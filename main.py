@@ -14,7 +14,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from logging_config import configure_logging, get_logger, request_id_middleware
 from models import ActionResponse
-from routers import admin, capabilities, ceph, cluster, logs, lxc
+from routers import admin, capabilities, ceph, cluster, logs, lxc, report
 from routers.logs import setup_self_logging
 from security import add_rate_limiting, get_api_key
 
@@ -26,7 +26,7 @@ logger = get_logger()
 
 app = FastAPI(
     title="Proxmox MCP Server",
-    version="0.4.0",
+    version="0.5.0",
     description="Priv-aware, repeatable tools: cluster status, Ceph, LXC/VM management, health snapshots.",
 )
 
@@ -55,6 +55,7 @@ app.include_router(cluster.router)
 app.include_router(ceph.router)
 app.include_router(logs.router)
 app.include_router(admin.router)
+app.include_router(report.router)
 
 # Optional API key protection on all routes (if MCP_API_KEY is set)
 @app.middleware("http")
@@ -79,7 +80,7 @@ async def pve_error_handler(request: Request, exc: HTTPException):
 def health():
     return ActionResponse(success=True, data={
         "status": "ok",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "pve_host": os.getenv("PVE_HOST", "https://pve-01:8006")
     })
 

@@ -89,3 +89,14 @@ Pushed to GitHub after these core robustness fixes.
 - [ ] Clean test harness for middleware/dependency
 
 This enables Hermes to keep the MCP current autonomously.
+
+## Stronghold MCP Visibility Report & Integration (feature/stronghold-mcp-visibility-report — started 2026-09-05)
+- [x] Branch created from main@5c52ba2 (current running commit)
+- [x] Improve on-demand Discord report: implemented /report/visibility with Markdown tables, summaries, warnings, graph data
+- [x] Added /report/visibility + per-node inventory + graph-friendly PG/OSD data
+- [x] Documented in README + visibility report markdown sections
+- [x] /lxc/reverse-proxy-template already present and documented; leveraged in visibility flows
+- [x] Updated with 2026-09-04 probe findings + new visibility implementation notes
+- [x] Delivered: /report/visibility returns structured + markdown + raw_graph_data
+
+**Philosophy reminder**: All new work stays read-audit first; write actions remain gated.
