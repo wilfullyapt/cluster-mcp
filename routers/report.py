@@ -170,9 +170,11 @@ def _nodes_to_md(nodes: list[dict]) -> str:
     rows = []
     for n in nodes:
         mem = f"{n['mem']['used']}/{n['mem']['total']}"
-        rows.append(
-            f"| {n['node']} | {n['status']} | {n['cpu']:.1%} | {mem} | {n['vms_count']} | {n['containers_count']} | {n['storage_count']} | {n['uptime']} |"
+        row = (
+            f"| {n['node']} | {n['status']} | {n['cpu']:.1%} | {mem} | "
+            f"{n['vms_count']} | {n['containers_count']} | {n['storage_count']} | {n['uptime']} |"
         )
+        rows.append(row)
     return header + "\n".join(rows)
 
 
