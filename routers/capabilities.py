@@ -43,6 +43,8 @@ def get_capabilities():
         "ct_create": "VM.Allocate" in priv_list,
         "storage": any("Datastore" in p for p in priv_list),
         "ceph_full": "Ceph.Audit" in priv_list and "Sys.Audit" in priv_list,
+        "ceph_read": "Ceph.Audit" in priv_list,
+        "ceph_write": any(p in priv_list for p in ["Ceph.Manage", "Sys.Modify"]),
     }
     return ActionResponse(success=True, data={
         "permissions": perms,

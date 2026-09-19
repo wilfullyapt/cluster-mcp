@@ -10,4 +10,5 @@ pytest
 httpx
 pytest-cov
 ruff
-
+proxmox-sdk
+# python3-rados (system package on Ceph nodes / LXC)

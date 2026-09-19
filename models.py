@@ -37,3 +37,27 @@ class LXCCreateRequest(BaseModel):
 class CapabilitiesResponse(BaseModel):
     permissions: dict[str, Any]
     enabled_features: dict[str, bool]
+
+
+# --- Ceph response models ---------------------------------------------------
+
+class CephHealthResponse(BaseModel):
+    fsid: str | None = None
+    status: str
+    stats: dict[str, Any] | None = None
+
+
+class CephOSDResponse(BaseModel):
+    status: str
+    osds: list[dict[str, Any]] | None = None
+
+
+class CephPoolStatsResponse(BaseModel):
+    status: str
+    pools: list[str] | None = None
+    count: int | None = None
+
+
+class CephFSUsageResponse(BaseModel):
+    status: str
+    usage: dict[str, Any] | None = None
