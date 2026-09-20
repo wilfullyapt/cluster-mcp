@@ -7,7 +7,7 @@ select = ["E", "F", "I", "UP"]
 ignore = ["F821", "BLE001", "RUF013", "PERF102", "E402", "E741"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["routers", "models", "security", "logging_config"]
+known-first-party = ["routers", "models", "security", "logging_config", "services", "clients"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
