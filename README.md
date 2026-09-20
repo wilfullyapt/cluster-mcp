@@ -74,7 +74,7 @@ docker compose up -d --build
 # Update: docker compose up -d --build
 ```
 
-## Endpoints (v0.2 – Repeatable Focus)
+## Endpoints (v0.5 – Visibility & Admin Focus)
 - `GET /health`
 - `GET /cluster/status`
 - `GET /nodes`
@@ -83,9 +83,38 @@ docker compose up -d --build
 - `GET /resources?type=vm|container|storage`
 - `GET /tasks/recent`
 - `GET /health/snapshot` ← aggregated report
+- `GET /report/visibility` ← rich per-node inventory, Ceph PG/OSD health, warnings, Markdown sections + graph-friendly data for Discord/Hermes
+- `POST /admin/update` (self-update endpoint for autonomous maintenance)
 - `POST /vm/{node}/{vmid}/status/{start|stop|reboot|shutdown}` (gated)
 
 All return `ActionResponse {success, data, error}`. PVE calls use the configured token.
+
+
+## Visibility Reports (feature/stronghold-mcp-visibility-report)
+
+**`/report/visibility`** returns rich aggregated data optimized for Discord embeds and Hermes digests:
+
+- Per-node inventory (status, CPU/mem, VM/CT counts, uptime)
+- Resource summary by type
+- Ceph health + PG state counts (graph data)
+- OSD summary (up/down/in/out)
+- Actionable warnings list
+- Pre-formatted Markdown tables/sections for immediate posting
+- Raw graph payloads (pg_states, node metrics)
+
+Example usage in Hermes: call and render the `markdown` or `summary` sections.
+
+**Full Working Surface (current endpoints + privs)**:
+- `/health`, `/cluster/status`, `/nodes`, `/resources`, `/ceph/status`, `/ceph/osds`, `/tasks/recent`, `/health/snapshot`, `/report/visibility`: Read (Sys.Audit, Datastore.Audit, etc.)
+- `/lxc/create`, `/lxc/exec` (gated with confirm): Write (VM.Allocate, etc.) — use with care
+- `/admin/update`: Protected by MCP_API_KEY; triggers git pull + restart
+- `/lxc/reverse-proxy-template`: Returns Caddy-ready LXC template (leverage for reverse proxy setups)
+- Capabilities mapping available via planned /capabilities once ACLs permit
+
+**Recommended PVE token privs**: See references/permissions-cheatsheet.md (Sys.Audit, Datastore.Audit, VM.Monitor, etc. for read-heavy ops).
+
+Flows: Status queries → visibility report → Discord digest. Write actions always require explicit confirm + role checks.
+
 
 ## Auto-Update on Push (Future / Optional)
 - GitHub webhook → LXC deploy hook (simple HTTP endpoint that validates secret and runs update.sh).
@@ -147,3 +176,46 @@ curl -X POST http://mcp-ip:8000/admin/update \
 ```
 
 After calling, poll `/health` or `/admin/update/status`.
+
+
+## Updating (Self-Update with Safety Checks)
+
+The MCP server supports remote self-updates via the `/admin/update` endpoint (protected by API key).
+
+### How Updates Work
+
+1. **Pre-flight Checks**
+   - Runs `ruff check --fix`
+   - Runs `pytest -q`
+   - Imports the main application (catches import-time errors)
+
+2. **Update Execution**
+   - Fetches the target ref
+   - Checks out / pulls the new code
+   - Runs `pip install -r requirements.txt`
+
+3. **Post-Update Validation**
+   - Runs a health check (imports the app)
+   - **Automatic rollback** to the previous commit if the health check fails
+
+4. **Last-Known-Good Tracking**
+   - Records the successful commit for future reference
+
+### Triggering an Update
+
+```bash
+curl -X POST "http://YOUR_MCP_IP:8000/admin/update"   -H "X-API-Key: your-api-key"   -H "Content-Type: application/json"   -d '{"ref": "origin/main", "force": false}'
+```
+
+**Parameters:**
+- `ref`: Git ref to update to (branch, tag, or commit)
+- `force`: If true, does a hard reset instead of checkout + pull
+
+### Safety Features
+
+- Pre-flight validation before any changes
+- Post-update health check with automatic rollback
+- All operations are logged
+- Last-known-good commit is recorded on success
+
+**Note:** Always test updates in a non-production environment first. The self-update mechanism is powerful but should be used with caution.

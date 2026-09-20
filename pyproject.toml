@@ -7,8 +7,20 @@ select = ["E", "F", "I", "UP"]
 ignore = ["F821", "BLE001", "RUF013", "PERF102", "E402", "E741"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["routers", "models", "security", "logging_config"]
+known-first-party = ["routers", "models", "security", "logging_config", "services", "clients", "exceptions", "config"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[project]
+name = "proxmox-mcp"
+version = "0.6.0"
+description = "Proxmox MCP Server"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["routers*", "services*", "clients*"]
+exclude = ["tests*", "references*"]

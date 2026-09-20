@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 pydantic
+pydantic-settings
 requests
 python-dotenv
 structlog
@@ -9,5 +10,6 @@ prometheus-fastapi-instrumentator
 pytest
 httpx
 pytest-cov
-ruff
-
+ruff==0.6.9
+proxmox-sdk
+# python3-rados (system package on Ceph nodes / LXC)
