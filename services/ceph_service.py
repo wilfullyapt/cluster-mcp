@@ -28,7 +28,3 @@ class CephService:
 
     def get_cephfs_usage(self) -> dict[str, Any]:
         return self.client.get_cephfs_usage()
-
-
-# Singleton service for routers
-ceph_service = CephService()
