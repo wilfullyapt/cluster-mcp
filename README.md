@@ -176,3 +176,46 @@ curl -X POST http://mcp-ip:8000/admin/update \
 ```
 
 After calling, poll `/health` or `/admin/update/status`.
+
+
+## Updating (Self-Update with Safety Checks)
+
+The MCP server supports remote self-updates via the `/admin/update` endpoint (protected by API key).
+
+### How Updates Work
+
+1. **Pre-flight Checks**
+   - Runs `ruff check --fix`
+   - Runs `pytest -q`
+   - Imports the main application (catches import-time errors)
+
+2. **Update Execution**
+   - Fetches the target ref
+   - Checks out / pulls the new code
+   - Runs `pip install -r requirements.txt`
+
+3. **Post-Update Validation**
+   - Runs a health check (imports the app)
+   - **Automatic rollback** to the previous commit if the health check fails
+
+4. **Last-Known-Good Tracking**
+   - Records the successful commit for future reference
+
+### Triggering an Update
+
+```bash
+curl -X POST "http://YOUR_MCP_IP:8000/admin/update"   -H "X-API-Key: your-api-key"   -H "Content-Type: application/json"   -d '{"ref": "origin/main", "force": false}'
+```
+
+**Parameters:**
+- `ref`: Git ref to update to (branch, tag, or commit)
+- `force`: If true, does a hard reset instead of checkout + pull
+
+### Safety Features
+
+- Pre-flight validation before any changes
+- Post-update health check with automatic rollback
+- All operations are logged
+- Last-known-good commit is recorded on success
+
+**Note:** Always test updates in a non-production environment first. The self-update mechanism is powerful but should be used with caution.
