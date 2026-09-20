@@ -12,3 +12,6 @@ known-first-party = ["routers", "models", "security", "logging_config", "service
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.setuptools.packages]
+packages = ["routers", "services", "clients"]
