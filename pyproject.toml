@@ -13,5 +13,7 @@ known-first-party = ["routers", "models", "security", "logging_config", "service
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
-[tool.setuptools.packages]
+["routers", "services", "clients"]
+
+[tool.setuptools]
 packages = ["routers", "services", "clients"]
