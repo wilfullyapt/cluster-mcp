@@ -16,3 +16,7 @@ testpaths = ["tests"]
 
 [tool.setuptools]
 packages = ["routers", "services", "clients"]
+
+[project]
+name = "proxmox-mcp"
+version = "0.6.0"
