@@ -5,16 +5,33 @@ This is the single source of truth for the self-maintenance flow.
 
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from config import settings
-from logging_config import get_logger
+from config import settings as default_settings
+from logging_config import get_logger as default_get_logger
+
+
+class SettingsProtocol(Protocol):
+    mcp_repo_root: Path
+    last_known_good_file: Path
+
+
+class LoggerProtocol(Protocol):
+    def info(self, msg: str, **kwargs: Any) -> None: ...
+    def error(self, msg: str, **kwargs: Any) -> None: ...
 
 
 class UpdateOrchestrator:
-    def __init__(self, repo_root: Path | None = None):
-        self.repo_root = repo_root or settings.mcp_repo_root
-        self.logger = get_logger("update.orchestrator")
+    def __init__(
+        self,
+        repo_root: Path | None = None,
+        settings: SettingsProtocol | None = None,
+        get_logger: Any = None,
+    ):
+        self.settings = settings or default_settings
+        self.get_logger = get_logger or default_get_logger
+        self.repo_root = repo_root or self.settings.mcp_repo_root
+        self.logger = self.get_logger("update.orchestrator")
 
     def run_preflight(self) -> tuple[bool, str]:
         """Run ruff + pytest before applying the update."""
@@ -47,7 +64,7 @@ class UpdateOrchestrator:
         commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=self.repo_root, text=True
         ).strip()
-        settings.last_known_good_file.write_text(commit)
+        self.settings.last_known_good_file.write_text(commit)
         self.logger.info("Recorded last-known-good", commit=commit)
         return commit
 
