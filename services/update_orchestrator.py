@@ -68,6 +68,17 @@ class UpdateOrchestrator:
         self.logger.info("Recorded last-known-good", commit=commit)
         return commit
 
+    def _health_check(self) -> bool:
+        """Basic post-update health check."""
+        try:
+            # Import the app to catch import-time errors
+            import main  # noqa: F401
+            # Could add a lightweight Proxmox ping here later
+            return True
+        except Exception as exc:
+            self.logger.error("Post-update health check failed", error=str(exc))
+            return False
+
     def perform_update(self, ref: str, force: bool = False) -> dict[str, Any]:
         """High-level update flow with pre-flight and rollback support."""
         self.logger.info("Starting orchestrated update", ref=ref, force=force)
@@ -101,21 +112,39 @@ class UpdateOrchestrator:
             result = subprocess.run(
                 cmd, cwd=self.repo_root, capture_output=True, text=True, timeout=180
             )
-            output_lines.append(f"$ {' '.join(cmd)}\n{result.stdout}{result.stderr}")
+            output_lines.append(f"$ {' '.join(cmd)}
+{result.stdout}{result.stderr}")
             if result.returncode != 0:
                 self.logger.error("Command failed", cmd=cmd)
                 if current != "unknown":
+                    self.logger.warning("Rolling back to previous commit", commit=current)
                     subprocess.run(["git", "reset", "--hard", current], cwd=self.repo_root)
                 return {
                     "success": False,
                     "error": f"Command failed: {' '.join(cmd)}",
-                    "output": "\n".join(output_lines),
+                    "output": "
+".join(output_lines),
                 }
+
+        # Post-update health check
+        if not self._health_check():
+            self.logger.error("Post-update health check failed — rolling back")
+            if current != "unknown":
+                subprocess.run(["git", "reset", "--hard", current], cwd=self.repo_root)
+            return {
+                "success": False,
+                "error": "Post-update health check failed",
+                "output": "
+".join(output_lines),
+            }
 
         # Success
         self.record_last_known_good()
+        self.logger.info("Update completed successfully", ref=ref)
         return {
             "success": True,
             "message": f"Update to {ref} completed.",
-            "output": "\n".join(output_lines),
+            "output": "
+".join(output_lines),
         }
+
