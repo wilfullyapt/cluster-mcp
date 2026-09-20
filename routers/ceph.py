@@ -3,14 +3,18 @@
 Uses CephService (which wraps CephClient) for richer data.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from models import ActionResponse
+from services.ceph_service import CephService
+
+
+def get_ceph_service() -> CephService:
+    return CephService()
+
 
 router = APIRouter(prefix="/ceph", tags=["Ceph"])
 
 
-@router.get("/status", response_model=ActionResponse)
-def ceph_status():
-    """Placeholder for status endpoint."""
-    return {"status": "ok"}
+@router.get("/health")
+def ceph_health(service: CephService = Depends(get_ceph_service)):
+    return service.get_health()
