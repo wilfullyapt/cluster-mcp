@@ -34,10 +34,14 @@ class UpdateOrchestrator:
         self.logger = self.get_logger("update.orchestrator")
 
     def run_preflight(self) -> tuple[bool, str]:
-        """Run ruff + pytest before applying the update."""
+        """Run ruff + pytest before applying the update (venv-aware)."""
+        venv_bin = self.repo_root / ".venv" / "bin"
+        ruff_cmd = str(venv_bin / "ruff") if (venv_bin / "ruff").exists() else "ruff"
+        python_cmd = str(venv_bin / "python") if (venv_bin / "python").exists() else "python"
+
         try:
             ruff = subprocess.run(
-                ["ruff", "check", ".", "--fix"],
+                [ruff_cmd, "check", ".", "--fix"],
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,
@@ -47,7 +51,7 @@ class UpdateOrchestrator:
                 return False, f"ruff failed:\n{ruff.stdout}\n{ruff.stderr}"
 
             pytest = subprocess.run(
-                ["python", "-m", "pytest", "-q", "--tb=no"],
+                [python_cmd, "-m", "pytest", "-q", "--tb=no"],
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,

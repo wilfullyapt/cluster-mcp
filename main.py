@@ -3,9 +3,12 @@ Proxmox MCP Server — Repeatable, priv-aware tools for Proxmox clusters.
 Self-contained, deployable as LXC or Docker.
 Focus: status, reports, queries, routine maintenance (Ceph, cluster, network, tasks).
 Finite/one-off work stays on SSH path.
+Self-updating with commit visibility (v0.6.0+).
 """
 
 import os
+import subprocess
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -23,11 +26,13 @@ configure_logging()
 setup_self_logging()
 logger = get_logger()
 
-
 app = FastAPI(
     title="Proxmox MCP Server",
-    version="0.5.0",
-    description="Priv-aware, repeatable tools: cluster status, Ceph, LXC/VM management, health snapshots.",
+    version="0.6.0",
+    description=(
+        "Priv-aware, repeatable tools: cluster status, Ceph, LXC/VM management, "
+        "health snapshots. Self-updating with commit visibility."
+    ),
 )
 
 # CORS (tighten in production)
@@ -64,7 +69,6 @@ async def api_key_middleware(request: Request, call_next):
         get_api_key(request.headers.get("X-API-Key"))
     return await call_next(request)
 
-
 # Better error handling for PVE responses
 @app.exception_handler(HTTPException)
 async def pve_error_handler(request: Request, exc: HTTPException):
@@ -74,16 +78,35 @@ async def pve_error_handler(request: Request, exc: HTTPException):
         return {"success": False, "error": "Proxmox API error", "detail": exc.detail}
     return {"success": False, "error": str(exc.detail)}
 
+def _get_git_info() -> dict:
+    """Return current commit, branch, and dirty status for version visibility."""
+    cwd = Path(".").resolve()
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=cwd, text=True, timeout=5
+        ).strip()
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, text=True, timeout=5
+        ).strip()
+        dirty = subprocess.run(
+            ["git", "diff", "--quiet"], cwd=cwd, capture_output=True, timeout=5
+        ).returncode != 0
+        return {"commit": commit, "branch": branch, "dirty": dirty}
+    except Exception:
+        return {"commit": "unknown", "branch": "unknown", "dirty": False}
 
-# Legacy /health
+# Enhanced /health with commit visibility (v0.6.0+)
 @app.get("/health", response_model=ActionResponse)
 def health():
+    git = _get_git_info()
     return ActionResponse(success=True, data={
         "status": "ok",
-        "version": "0.5.0",
+        "version": "0.6.0-dev",
+        "commit": git["commit"],
+        "branch": git["branch"],
+        "dirty": git["dirty"],
         "pve_host": os.getenv("PVE_HOST", "https://pve-01:8006")
     })
-
 
 if __name__ == "__main__":
     import uvicorn
