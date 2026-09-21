@@ -1,0 +1,18 @@
+[Unit]
+Description=Proxmox MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/proxmox-mcp
+EnvironmentFile=/opt/proxmox-mcp/.env
+ExecStart=/opt/proxmox-mcp/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+ExecStopPost=/opt/proxmox-mcp/scripts/rollback-on-failure.sh
+Restart=always
+RestartSec=5
+WatchdogSec=30s
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

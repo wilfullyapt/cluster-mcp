@@ -1,30 +1,24 @@
-"""Ceph service layer.
+"""CephService – thin business layer over CephClient."""
 
-Thin orchestration layer over CephClient. Future home for caching,
-business rules, and structured response shaping.
-"""
+from __future__ import annotations
 
 from typing import Any
 
-from clients.ceph import CephClient, ceph_client
-from exceptions import CephConnectionError
+from clients.ceph_client import CephClient
 
 
 class CephService:
     def __init__(self, client: CephClient | None = None):
-        self.client = client or ceph_client
+        self.client = client or CephClient()
 
     def get_health(self) -> dict[str, Any]:
-        try:
-            return self.client.health()
-        except Exception as exc:
-            raise CephConnectionError() from exc
+        return self.client.get_health()
 
-    def get_osd_status(self) -> dict[str, Any]:
-        return self.client.get_osd_status()
+    def get_status(self) -> dict[str, Any]:
+        return self.client.get_status()
 
-    def get_pool_stats(self) -> dict[str, Any]:
-        return self.client.get_pool_stats()
+    def get_osds(self) -> list[dict[str, Any]]:
+        return self.client.get_osds()
 
-    def get_cephfs_usage(self) -> dict[str, Any]:
-        return self.client.get_cephfs_usage()
+    def get_fs(self) -> dict[str, Any]:
+        return self.client.get_fs()

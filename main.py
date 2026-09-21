@@ -28,7 +28,7 @@ logger = get_logger()
 
 app = FastAPI(
     title="Proxmox MCP Server",
-    version="0.6.0",
+    version="0.7.0",
     description=(
         "Priv-aware, repeatable tools: cluster status, Ceph, LXC/VM management, "
         "health snapshots. Self-updating with commit visibility."
