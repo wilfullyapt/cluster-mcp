@@ -105,6 +105,10 @@ class UpdateOrchestrator:
             return {"success": False, "error": msg}
 
         # Robust Git sequence
+        # Build venv-aware commands
+        venv_bin = self.repo_root / ".venv" / "bin"
+        pip_cmd = str(venv_bin / "pip") if (venv_bin / "pip").exists() else "pip"
+
         commands = [["git", "fetch", "origin"]]
 
         if force:
@@ -115,7 +119,7 @@ class UpdateOrchestrator:
             commands.append(["git", "checkout", "-B", ref, f"origin/{ref}"])
             commands.append(["git", "reset", "--hard", f"origin/{ref}"])
 
-        commands.append(["pip", "install", "-r", "requirements.txt", "--quiet"])
+        commands.append([pip_cmd, "install", "-r", "requirements.txt", "--quiet"])
 
         output_lines = []
         for cmd in commands:
@@ -131,7 +135,7 @@ class UpdateOrchestrator:
                     subprocess.run(["git", "reset", "--hard", current], cwd=self.repo_root)
                 return {
                     "success": False,
-                    "error": f"Command failed: {' '.join(cmd)}",
+                    "error": f"Command failed: {' '.join(cmd)} (venv/pip issue? check .venv/bin/pip)",
                     "output": "\n".join(output_lines),
                 }
 
@@ -146,11 +150,37 @@ class UpdateOrchestrator:
                 "output": "\n".join(output_lines),
             }
 
-        # Success
+        # Success - restart service
+        restarted, restart_msg = self._restart_service() if hasattr(self, "_restart_service") else (True, "No restart method")
         self.record_last_known_good()
-        self.logger.info("Update completed successfully", ref=ref)
+        self.logger.info("Update completed successfully", ref=ref, restarted=restarted)
         return {
             "success": True,
-            "message": f"Update to {ref} completed.",
+            "message": f"Update to {ref} completed. Restart: {restart_msg}",
             "output": "\n".join(output_lines),
         }
+
+    def _restart_service(self) -> tuple[bool, str]:
+        """Restart the MCP service after a successful update.
+
+        Preferred: systemctl
+        Fallback: pkill uvicorn (relies on systemd Restart=always)
+        """
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", "proxmox-mcp"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                self.logger.info("Service restarted via systemctl")
+                return True, "systemctl restart successful"
+
+            self.logger.warning("systemctl restart failed, trying pkill fallback")
+            subprocess.run(["pkill", "-f", "uvicorn"], capture_output=True, timeout=10)
+            return True, "pkill fallback (systemd Restart=always will respawn)"
+
+        except Exception as exc:
+            self.logger.error("Restart failed", error=str(exc))
+            return False, f"restart error: {exc}"
