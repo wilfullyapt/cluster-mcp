@@ -12,8 +12,9 @@ class Settings(BaseSettings):
     mcp_version: str = os.getenv("MCP_VERSION", "0.6.0")
     ceph_conffile: Path = Path(os.getenv("CEPH_CONFFILE", "/etc/ceph/ceph.conf"))
 
-    class Config:
-        env_file = ".env"
-
+    model_config = {
+        "env_file": ".env",
+        "extra": "allow",
+    }
 
 settings = Settings()

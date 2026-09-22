@@ -82,7 +82,13 @@ class UpdateOrchestrator:
         return commit
 
     def perform_update(self, ref: str, force: bool = False) -> dict[str, Any]:
-        """High-level update flow with pre-flight and rollback support."""
+        """High-level update flow with pre-flight and rollback support.
+
+        More robust git handling:
+        - Always clean working tree before update
+        - Use reset --hard to origin/ref for reliable fast-forwards
+        - Handles untracked files (e.g. .last_known_good)
+        """
         self.logger.info("Starting orchestrated update", ref=ref, force=force)
 
         try:
@@ -98,14 +104,17 @@ class UpdateOrchestrator:
             self.logger.error("Pre-flight failed", msg=msg)
             return {"success": False, "error": msg}
 
-        # Git + pip commands
+        # Robust Git sequence
         commands = [["git", "fetch", "origin"]]
+
         if force:
-            commands.append(["git", "reset", "--hard", ref])
+            commands.append(["git", "reset", "--hard", f"origin/{ref}"])
         else:
-            branch = ref.split("/")[-1] if "/" in ref else ref
-            commands.append(["git", "checkout", branch])
-            commands.append(["git", "pull", "--ff-only"])
+            # Clean any untracked files (e.g. .last_known_good) then hard reset to origin
+            commands.append(["git", "clean", "-fd"])
+            commands.append(["git", "checkout", "-B", ref, f"origin/{ref}"])
+            commands.append(["git", "reset", "--hard", f"origin/{ref}"])
+
         commands.append(["pip", "install", "-r", "requirements.txt", "--quiet"])
 
         output_lines = []
