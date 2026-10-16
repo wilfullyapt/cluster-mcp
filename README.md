@@ -1,4 +1,4 @@
-# Stronghold Proxmox MCP Server
+# Stronghold ClusterMCP Server
 
 Self-contained, repeatable-tools server for Hermes butler access to Proxmox cluster, VMs/LXCs, Ceph, network inventory, tasks, and health snapshots.
 
@@ -20,8 +20,8 @@ Use or adapt `scripts/create-lxc.sh` (update IP to YOUR_MCP_LXC_IP/24, CTID, sto
 apt update && apt install -y python3 python3-venv python3-pip git curl
 
 # Clone (after repo is public/pushed)
-git clone https://github.com/wilfullyapt/proxmox-mcp.git /opt/proxmox-mcp
-cd /opt/proxmox-mcp
+git clone https://github.com/wilfullyapt/clustermcp.git /opt/clustermcp
+cd /opt/clustermcp
 
 # Setup
 cp .env.example .env
@@ -38,12 +38,12 @@ See `references/systemd-unit.md` for the unit file.
 
 ```bash
 # Copy and enable
-sudo cp references/systemd-unit.md /etc/systemd/system/proxmox-mcp.service
+sudo cp references/systemd-unit.md /etc/systemd/system/clustermcp.service
 # (or paste the [Unit] content directly)
 sudo systemctl daemon-reload
-sudo systemctl enable --now proxmox-mcp
-sudo systemctl status proxmox-mcp
-journalctl -u proxmox-mcp -f
+sudo systemctl enable --now clustermcp
+sudo systemctl status clustermcp
+journalctl -u clustermcp -f
 ```
 
 `Restart=always` ensures recovery on crash or reboot.
@@ -57,12 +57,12 @@ Minimal role + ACL at `/` is required for cluster-wide endpoints. Current token 
 After initial clone and service setup:
 
 ```bash
-cd /opt/proxmox-mcp && ./scripts/update.sh
+cd /opt/clustermcp && ./scripts/update.sh
 ```
 
 Or directly:
 ```bash
-cd /opt/proxmox-mcp && git pull && sudo systemctl restart proxmox-mcp
+cd /opt/clustermcp && git pull && sudo systemctl restart clustermcp
 ```
 
 This pulls latest, rebuilds if Docker, or restarts the systemd service. Run inside the LXC.

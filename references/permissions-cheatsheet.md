@@ -1,4 +1,4 @@
-# Proxmox MCP Token Permissions Cheatsheet
+# ClusterMCP Token Permissions Cheatsheet
 
 ## Recommended Minimal Role (PVEAuditor-like)
 

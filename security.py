@@ -1,4 +1,4 @@
-"""Security and rate limiting for Proxmox MCP."""
+"""Security and rate limiting for ClusterMCP."""
 
 import os
 

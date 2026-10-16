@@ -1,4 +1,4 @@
-"""Custom exceptions for the Proxmox MCP (cluster-mcp)."""
+"""Custom exceptions for the ClusterMCP (cluster-mcp)."""
 
 import sys
 import traceback

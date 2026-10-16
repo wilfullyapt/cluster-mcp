@@ -14,9 +14,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [project]
-name = "proxmox-mcp"
-version = "0.6.0"
-description = "Proxmox MCP Server"
+name = "clustermcp"
+version = "0.8.0-dev"
+description = "ClusterMCP Server"
 readme = "README.md"
 requires-python = ">=3.11"
 

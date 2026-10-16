@@ -1,4 +1,4 @@
-# Proxmox MCP TODOs — Building Out API-Controlled Systems
+# ClusterMCP TODOs — Building Out API-Controlled Systems
 
 This MCP provides repeatable, auditable access to Proxmox systems. Future expansions should stay read-heavy for status/automation while gating write actions.
 
@@ -61,7 +61,7 @@ Observed via direct HTTP probes against running LXC (192.168.0.233:8000) against
 
 ### Suggested Improvements (beyond existing TODO)
 - Add robust error handling + structured PVE error mapping (currently some bare 403/501 leak).
-- Enhance logging_config for self-monitoring (as per stronghold-proxmox-mcp skill).
+- Enhance logging_config for self-monitoring (as per stronghold-clustermcp skill).
 - Update OpenAPI/models to prevent validation failures on real responses.
 - Add integration test or smoke test against live token (with read-only ACL).
 - Once ACL fixed, expand snapshot to include more metrics.

@@ -168,7 +168,7 @@ class UpdateOrchestrator:
         """
         try:
             result = subprocess.run(
-                ["systemctl", "restart", "proxmox-mcp"],
+                ["systemctl", "restart", "clustermcp"],
                 capture_output=True,
                 text=True,
                 timeout=30,

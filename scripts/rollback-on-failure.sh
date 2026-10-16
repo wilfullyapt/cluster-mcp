@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="${MCP_REPO_ROOT:-/opt/proxmox-mcp}"
+REPO_ROOT="${MCP_REPO_ROOT:-/opt/clustermcp}"
 LAST_GOOD_FILE="$REPO_ROOT/.last-known-good"
 HEALTH_URL="http://127.0.0.1:8000/health"
 MAX_ATTEMPTS=5
@@ -33,6 +33,6 @@ done
 echo "Health check failed after update. Rolling back to $LAST_GOOD"
 git reset --hard "$LAST_GOOD"
 git clean -fd
-systemctl restart proxmox-mcp || true
+systemctl restart clustermcp || true
 echo "Rollback completed."
 exit 1
