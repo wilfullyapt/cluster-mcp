@@ -29,12 +29,12 @@ LINE = (48, 58, 78)
 ICON_RING = (12, 14, 22)
 
 # Export geometry
+# Discord downscales by longest edge. A 3200×23000 strip becomes ~500px wide.
+# Keep width large and height bounded (2-col lists + compact rows).
 BASE_WIDTH = 1600
-DEFAULT_WIDTH = 3200  # wide canvas for zoom headroom
-# Discord phone column ~390 CSS-px. Prior cards targeted ~14px body and looked
-# identical when only width×fonts scaled together. Target higher on-screen type.
+DEFAULT_WIDTH = 4096
 PHONE_COL_CSS = 390
-TARGET_BODY_CSS_PX = 22  # visibly larger than prior ~14px fit-width body
+TARGET_BODY_CSS_PX = 20
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -192,10 +192,12 @@ class _Canvas:
         self.mono_f = _font(max(int(self.body_px * 0.90), self.u(52)))
         self.small_f = _font(max(int(self.body_px * 0.78), self.u(42)))
         self.chip_f = _font(max(int(self.body_px * 0.82), self.u(46)))
-        self.icon = max(self.u(40), int(self.body_px * 0.7))
-        self.row_h = max(self.u(120), int(self.body_px * 2.2))
-        self.header_h = max(self.u(96), int(self.body_px * 1.7))
-        self.section_h = max(self.u(120), int(self.body_px * 2.2))
+        self.icon = max(self.u(32), int(self.body_px * 0.55))
+        # Compact vertical rhythm — single-image must stay short enough that
+        # Discord long-edge downscale does not collapse width.
+        self.row_h = max(self.u(72), int(self.body_px * 1.35))
+        self.header_h = max(self.u(56), int(self.body_px * 1.15))
+        self.section_h = max(self.u(72), int(self.body_px * 1.35))
         self.scratch = Image.new("RGB", (self.width, max(160, self.u(160))), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
@@ -253,12 +255,30 @@ class _Canvas:
     def multiline_rows(
         self,
         rows: list[tuple[str, tuple[int, int, int], str, str]],
-        row_h: int = 150,
+        row_h: int = 100,
     ) -> None:
         rh = self.u(row_h)
         h = max(1, len(rows)) * rh + self.u(8)
         self.elements.append(("mrows", self.y, rows, rh, h))
-        self.y += h + self.u(36)
+        self.y += h + self.u(20)
+
+    def multiline_rows_2col(
+        self,
+        rows: list[tuple[str, tuple[int, int, int], str, str]],
+        row_h: int = 100,
+    ) -> None:
+        """Two columns — halves list height so single-image width survives Discord."""
+        rh = self.u(row_h)
+        if not rows:
+            self.multiline_rows(rows, row_h=row_h)
+            return
+        mid = (len(rows) + 1) // 2
+        left, right = rows[:mid], rows[mid:]
+        while len(right) < len(left):
+            right.append(("muted", MUTED, "", ""))
+        h = len(left) * rh + self.u(8)
+        self.elements.append(("mrows2", self.y, left, right, rh, h))
+        self.y += h + self.u(20)
 
     def bullet_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         total = self.u(16)
@@ -445,6 +465,53 @@ class _Canvas:
                     ry += rh
                 draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
                 continue
+            if kind == "mrows2":
+                _, y, left, right, rh, _h = el
+                gap = u(20)
+                col_w = (self.content_w - gap) // 2
+                ry = y
+                for idx_row, (skind, scolor, primary, secondary) in enumerate(left):
+                    bg = ROW_A if idx_row % 2 == 0 else ROW_B
+                    x0 = self.pad
+                    x1 = self.pad + col_w
+                    draw.rectangle((x0, ry, x1, ry + rh), fill=bg)
+                    if primary:
+                        _draw_status_icon(
+                            draw,
+                            x0 + u(12),
+                            ry + (rh - self.icon) // 2,
+                            skind,
+                            scolor,
+                            size=self.icon,
+                        )
+                        max_w = col_w - u(80)
+                        p = _fit_cell(draw, primary, self.mono_f, max_w)
+                        s = _fit_cell(draw, secondary, self.small_f, max_w)
+                        draw.text((x0 + u(52), ry + u(12)), p, font=self.mono_f, fill=TEXT)
+                        draw.text((x0 + u(52), ry + u(12) + u(40)), s, font=self.small_f, fill=MUTED)
+                    draw.line((x0, ry + rh - 1, x1, ry + rh - 1), fill=LINE, width=max(2, u(2)))
+                    sk2, sc2, p2, s2 = right[idx_row]
+                    x2 = self.pad + col_w + gap
+                    x3 = self.width - self.pad
+                    draw.rectangle((x2, ry, x3, ry + rh), fill=bg)
+                    if p2:
+                        _draw_status_icon(
+                            draw,
+                            x2 + u(12),
+                            ry + (rh - self.icon) // 2,
+                            sk2,
+                            sc2,
+                            size=self.icon,
+                        )
+                        max_w = col_w - u(80)
+                        pp = _fit_cell(draw, p2, self.mono_f, max_w)
+                        ss = _fit_cell(draw, s2, self.small_f, max_w)
+                        draw.text((x2 + u(52), ry + u(12)), pp, font=self.mono_f, fill=TEXT)
+                        draw.text((x2 + u(52), ry + u(12) + u(40)), ss, font=self.small_f, fill=MUTED)
+                    draw.line((x2, ry + rh - 1, x3, ry + rh - 1), fill=LINE, width=max(2, u(2)))
+                    ry += rh
+                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
+                continue
             if kind == "bullets":
                 _, y, wrapped_all, _total, line_h = el
                 yy = y
@@ -602,7 +669,7 @@ def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, inclu
                     f"source={osd_summary.get('source') or '—'} · not fabricated",
                 )
             ],
-            row_h=140,
+            row_h=100,
         )
     if include_footer:
         c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · {page_label}")
@@ -661,7 +728,7 @@ def _fill_storage(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
             f"{s.get('type') or '—'}   used {s.get('used_human') or '—'} / {s.get('total_human') or '—'}   fill {ratio_s}"
         )
         st_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows(st_mrows, row_h=140)
+    c.multiline_rows(st_mrows, row_h=100)
 
     if warnings:
         c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s)")
@@ -731,7 +798,7 @@ def render_visibility_image(
             f"disk {ct.get('disk_human') or '—'}   up {ct.get('uptime_human') or '—'}{tags}"
         )
         ct_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows(ct_mrows, row_h=150)
+    c.multiline_rows_2col(ct_mrows, row_h=100)
     st_statuses = [s.get("status") for s in storage]
     st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
     c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} objects")
@@ -745,7 +812,7 @@ def render_visibility_image(
             f"{s.get('type') or '—'}   used {s.get('used_human') or '—'} / {s.get('total_human') or '—'}   fill {ratio_s}"
         )
         st_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows(st_mrows, row_h=140)
+    c.multiline_rows_2col(st_mrows, row_h=100)
     if warnings:
         c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s)")
         c.bullet_block([(str(w), WARN) for w in warnings])
