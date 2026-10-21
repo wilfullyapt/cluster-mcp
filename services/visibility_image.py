@@ -181,7 +181,7 @@ class _Canvas:
         self.body_px = max(48, int(round(float(target_body_css) * self.width / float(phone_col_css))))
         # Spacing/layout scale follows body (base design body was 58 at 1600).
         self.scale = self.body_px / 58.0
-        self.pad = self.u(64)
+        self.pad = max(48, int(self.body_px * 0.4))
         self.content_w = self.width - self.pad * 2
         self.y = self.pad
         self.elements: list[tuple] = []
@@ -212,12 +212,13 @@ class _Canvas:
 
     def title_block(self, title: str, meta: str, overall_label: str, overall_color: tuple[int, int, int]) -> None:
         self.elements.append(("title", self.y, title, meta, overall_label, overall_color))
-        self.y += self.u(78 + 20 + 48 + 28 + 72 + 44)
+        # ~ title + meta + overall pill — tied to body, not inflated base units
+        self.y += int(self.body_px * 3.6) + self.u(24)
 
     def section_header(self, name: str, status_label: str, status_color: tuple[int, int, int], subtitle: str = "") -> None:
-        h = self.section_h + (self.u(48) if subtitle else 0)
+        h = self.section_h + (int(self.body_px * 0.55) if subtitle else 0)
         self.elements.append(("section", self.y, name, status_label, status_color, subtitle, h))
-        self.y += h + self.u(24)
+        self.y += h + int(self.body_px * 0.25)
 
     def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
         x = 0
@@ -227,16 +228,16 @@ class _Canvas:
         for label, value, vcolor in items:
             text = f"{label}  {value}"
             tw, th = _text_size(self.d0, text, self.chip_f)
-            chip_w = tw + (self.u(56) if vcolor else self.u(40))
-            chip_h = th + self.u(32)
+            chip_w = tw + (int(self.body_px * 0.7) if vcolor else int(self.body_px * 0.45))
+            chip_h = th + int(self.body_px * 0.35)
             row_h = max(row_h, chip_h)
             if x + chip_w > max_w and x > 0:
                 rows += 1
                 x = 0
-            x += chip_w + self.u(16)
-        total_h = rows * (row_h + self.u(16)) + self.u(8)
+            x += chip_w + int(self.body_px * 0.2)
+        total_h = rows * (row_h + int(self.body_px * 0.18)) + 4
         self.elements.append(("chips", self.y, items, total_h))
-        self.y += total_h + self.u(20)
+        self.y += total_h + int(self.body_px * 0.2)
 
     def table(
         self,
@@ -245,22 +246,22 @@ class _Canvas:
         rows: list[tuple[str, tuple[int, int, int], list[str]]],
         row_h: int | None = None,
     ) -> None:
-        # row_h is BASE_WIDTH design units when provided
-        rh = self.row_h if row_h is None else self.u(row_h)
+        rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.25))
         hh = self.header_h
-        h = hh + max(1, len(rows)) * rh + self.u(10)
+        h = hh + max(1, len(rows)) * rh + 8
         self.elements.append(("table", self.y, headers, col_weights, rows, rh, hh, h))
-        self.y += h + self.u(28)
+        self.y += h + int(self.body_px * 0.25)
 
     def multiline_rows(
         self,
         rows: list[tuple[str, tuple[int, int, int], str, str]],
         row_h: int = 100,
     ) -> None:
-        rh = self.u(row_h)
-        h = max(1, len(rows)) * rh + self.u(8)
+        # Two-line rows sized from body_px (ignore inflated design-unit scale)
+        rh = max(int(self.body_px * 1.55), int(self.row_h * 1.05))
+        h = max(1, len(rows)) * rh + 6
         self.elements.append(("mrows", self.y, rows, rh, h))
-        self.y += h + self.u(20)
+        self.y += h + int(self.body_px * 0.2)
 
     def multiline_rows_2col(
         self,
@@ -268,7 +269,7 @@ class _Canvas:
         row_h: int = 100,
     ) -> None:
         """Two columns — halves list height so single-image width survives Discord."""
-        rh = self.u(row_h)
+        rh = max(int(self.body_px * 1.55), int(self.row_h * 1.05))
         if not rows:
             self.multiline_rows(rows, row_h=row_h)
             return
@@ -276,9 +277,9 @@ class _Canvas:
         left, right = rows[:mid], rows[mid:]
         while len(right) < len(left):
             right.append(("muted", MUTED, "", ""))
-        h = len(left) * rh + self.u(8)
+        h = len(left) * rh + 6
         self.elements.append(("mrows2", self.y, left, right, rh, h))
-        self.y += h + self.u(20)
+        self.y += h + int(self.body_px * 0.2)
 
     def bullet_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         total = self.u(16)
