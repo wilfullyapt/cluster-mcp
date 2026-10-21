@@ -2,6 +2,18 @@
 
 Self-contained, repeatable-tools server for Hermes butler access to Proxmox cluster, VMs/LXCs, Ceph, network inventory, tasks, and health snapshots.
 
+## Identity
+
+| Layer | Canonical name |
+|-------|----------------|
+| Product / package (`pyproject.toml`) | **ClusterMCP** / `clustermcp` |
+| Local checkout (seneschal) | `/root/seneschal/repos/clustermcp` |
+| Deploy path (LXC) | `/opt/clustermcp` · unit `clustermcp.service` |
+| Docker image / compose | `clustermcp:test` · service `clustermcp` |
+| **GitHub slug (intentional dual name)** | `wilfullyapt/proxmox-mcp` until Wil renames the remote repo |
+
+GitHub redirects after a future rename; keep origin as clean HTTPS (never embed PATs). Clone examples below use the current GitHub slug and install into `/opt/clustermcp`.
+
 **Philosophy**
 - MCP = repeatable queries and status tools (Ceph health, cluster overview, IP inventory, recent tasks, aggregated snapshots).
 - Finite/one-off work (new VM/LXC creation, interactive setup) stays on the SSH path.
@@ -19,7 +31,7 @@ Use or adapt `scripts/create-lxc.sh` (update IP to YOUR_MCP_LXC_IP/24, CTID, sto
 # Install deps
 apt update && apt install -y python3 python3-venv python3-pip git curl
 
-# Clone (GitHub remote still proxmox-mcp until Wil renames the repo)
+# Clone (GitHub slug still proxmox-mcp — intentional dual name; see Identity)
 git clone https://github.com/wilfullyapt/proxmox-mcp.git /opt/clustermcp
 cd /opt/clustermcp
 

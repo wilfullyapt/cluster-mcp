@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-29 (paths refreshed 2026-10-21)
 **Status**: Locked. All pins confirmed (C static binaries, nested mono-repo until OpenKEEP extract, collector vs runner split, signing model, Stronghold dogfood first).
-**SoR (near-term)**: `/root/seneschal/repos/proxmox-mcp/wardens/` (nested under ClusterMCP checkout; GitHub remote still `proxmox-mcp` until rename lands)
+**SoR (near-term)**: `/root/seneschal/repos/clustermcp/wardens/` (nested under ClusterMCP checkout; GitHub slug still `proxmox-mcp` — intentional dual name until Wil renames)
 **Central integration**: ClusterMCP Python FastAPI (LXC 106 historically; ops path Lamassu-owned)
 **ADR**: `reliquary/domains/shipyard/adr/0002-wardens-vs-clustermcp.md`
 
