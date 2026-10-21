@@ -77,9 +77,24 @@ def test_build_report_live_only_no_fabricated_osds():
 
 
 def test_render_image_png_signature():
+    resources = [
+        {
+            "type": "lxc",
+            "vmid": 1,
+            "name": "x",
+            "node": "n1",
+            "status": "running",
+            "mem": 1,
+            "maxmem": 2,
+            "disk": 1,
+            "maxdisk": 2,
+            "uptime": 1,
+            "cpu": 0,
+        }
+    ]
     report = build_visibility_report(
         nodes=[{"node": "n1", "status": "online", "cpu": 0.2, "mem": 1, "maxmem": 2, "uptime": 10}],
-        resources=[{"type": "lxc", "vmid": 1, "name": "x", "node": "n1", "status": "running", "mem": 1, "maxmem": 2, "disk": 1, "maxdisk": 2, "uptime": 1, "cpu": 0}],
+        resources=resources,
         cluster_status=[{"type": "cluster", "name": "demo", "quorate": 1, "nodes": 1}],
         ceph_status={"health": {"status": "HEALTH_OK"}, "osd": {"up": 1, "in": 1}, "pgmap": {"pgs_by_state": []}},
         ceph_osds_raw=[{"type": "osd", "id": 0, "status": "up", "in": True, "utilization": 12.3}],

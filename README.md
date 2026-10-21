@@ -18,6 +18,17 @@ GitHub redirects after a future rename; keep origin as clean HTTPS (never embed 
 - MCP = repeatable queries and status tools (Ceph health, cluster overview, IP inventory, recent tasks, aggregated snapshots).
 - Finite/one-off work (new VM/LXC creation, interactive setup) stays on the SSH path.
 - Dogfood for Stronghold → extractable OpenKEEP template.
+- **Wardens** = per-node C binaries on Proxmox hosts (not a PVE UI add-on) for host-local visibility; see `wardens/docs/`.
+
+## Wardens (node agents)
+
+Nested SoR: `wardens/`. Collector MVP pushes LXC + permission snapshots to `/wardens/*`.
+
+- Capabilities (shipped vs planned): `wardens/docs/CAPABILITIES.md`
+- Node install (lab): `wardens/docs/INSTALL-NODE.md`
+- Build: `cd wardens/build && make collector`
+
+Runner remains a non-functional skeleton — do not enable on nodes yet.
 
 ## Quick Deploy (LXC Recommended — Current Setup)
 

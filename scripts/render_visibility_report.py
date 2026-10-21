@@ -91,7 +91,7 @@ def main() -> int:
     report = build_visibility_report(
         nodes=nodes if isinstance(nodes, list) else [],
         resources=resources if isinstance(resources, list) else [],
-        cluster_status=cluster_status if isinstance(cluster_status, (list, dict)) else [],
+        cluster_status=cluster_status if isinstance(cluster_status, list | dict) else [],
         ceph_status=ceph_status if isinstance(ceph_status, dict) else {},
         ceph_osds_raw=ceph_osds,
         mcp_health=health if isinstance(health, dict) else None,

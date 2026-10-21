@@ -10,6 +10,7 @@
 int collect_permission_diag(permission_diag_t *out, const char *target_path) {
     struct stat st;
 
+    memset(out, 0, sizeof(*out));
     strncpy(out->target_path, target_path, sizeof(out->target_path) - 1);
 
     if (stat(target_path, &st) != 0) {
@@ -27,7 +28,7 @@ int collect_permission_diag(permission_diag_t *out, const char *target_path) {
     snprintf(out->capabilities, sizeof(out->capabilities), "mode=%o", (unsigned)(st.st_mode & 07777));
     strncpy(out->mapping_note, "basic stat + access check", sizeof(out->mapping_note) - 1);
 
-    printf("[collector] Permission diag for %s (uid=%s, readable=%d)\n",
-           target_path, out->effective_uid, out->readable);
+    fprintf(stderr, "[collector] Permission diag for %s (uid=%s, readable=%d)\n",
+            target_path, out->effective_uid, out->readable);
     return 0;
 }

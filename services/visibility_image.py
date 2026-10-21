@@ -21,10 +21,13 @@ LINE = (36, 42, 58)
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    dejavu = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    mono = "DejaVuSansMono-Bold.ttf" if bold else "DejaVuSansMono.ttf"
+    liberation = "LiberationSans-Bold.ttf" if bold else "LiberationSans-Regular.ttf"
     candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        f"/usr/share/fonts/truetype/dejavu/{dejavu}",
+        f"/usr/share/fonts/truetype/dejavu/{mono}",
+        f"/usr/share/fonts/truetype/liberation/{liberation}",
     ]
     for path in candidates:
         try:
@@ -151,7 +154,7 @@ def render_visibility_image(report: dict[str, Any], width: int = 1400) -> bytes:
     if osds:
         for o in osds:
             usage = o.get("usage")
-            usage_s = f"{usage:.1f}%" if isinstance(usage, (int, float)) else "—"
+            usage_s = f"{usage:.1f}%" if isinstance(usage, int | float) else "—"
             add(
                 f"  {o.get('name')}  ·  {o.get('status')}  ·  in={o.get('in')}  ·  use {usage_s}"
                 + (f"  ·  host {o.get('node')}" if o.get("node") else ""),
@@ -203,7 +206,11 @@ def render_visibility_image(report: dict[str, Any], width: int = 1400) -> bytes:
     else:
         for w in warnings:
             for wrapped in _wrap(d0, f"• {w}", body_f, width - 96):
-                add(f"  {wrapped}" if not wrapped.startswith("•") and wrapped != f"• {w}" else wrapped if wrapped.startswith("•") else f"  {wrapped}", body_f, WARN, 3)
+                if wrapped.startswith("•"):
+                    line = wrapped
+                else:
+                    line = f"  {wrapped}"
+                add(line, body_f, WARN, 3)
 
     # measure height
     y = 36

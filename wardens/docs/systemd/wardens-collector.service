@@ -1,0 +1,17 @@
+[Unit]
+Description=Wardens collector (push visibility to ClusterMCP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/wardens/collector.env
+ExecStart=/opt/wardens/bin/wardens-collector
+Nice=10
+# Read-only intent: collector should not need write to guest storage
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

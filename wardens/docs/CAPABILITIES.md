@@ -1,51 +1,77 @@
 # Wardens Capabilities (Collector + Runner)
 
-**Purpose**: Define exactly what each Warden can see and do so the central MCP can discover, gate, and dispatch accordingly.
+**Purpose:** Define what each Warden can see and do so ClusterMCP can discover, gate, and dispatch.
 
-**Discovery**: On registration + heartbeat, each node reports its capabilities. MCP stores node → caps mapping and exposes it via API.
+**Node agent model:** C binaries installed on each **Proxmox host** (systemd). Not a Proxmox VE UI add-on / marketplace package — a Stronghold node agent.
 
-## Visibility Capabilities (Collector)
+## Shipped in this branch (MVP)
 
-| Capability       | Description                                      | Warden Implementation (C)                          | MCP Endpoint / Storage                  | Discovery Method                  |
-|------------------|--------------------------------------------------|----------------------------------------------------|-----------------------------------------|-----------------------------------|
-| `lxc:full`       | Full LXC config, mounts, idmaps, resources      | Parse pve config files + /proc/cgroup + pct      | `/wardens/collector/lxc/{node}`        | Capabilities report + heartbeat  |
-| `cephfs:mapping` | Subvolumes, host ownership, permissions, quotas | ceph CLI + FS walk + stat calls                   | `/wardens/collector/cephfs/{node}`     | Capabilities report              |
-| `docker:status`  | Compose projects, containers, networks, volumes | docker compose inspect + known paths              | `/wardens/collector/docker/{node}`     | Capabilities report              |
-| `permissions:audit` | Effective UID/GID, capabilities, path checks | getcap, stat, idmap resolution                    | `/wardens/collector/permissions/{node}`| Capabilities report              |
-| `troubleshoot:bundle` | Aggregated diagnostic snapshot                | Combine above + errors + loadavg                  | `/wardens/collector/bundle/{node}`     | Any visibility cap present       |
+### ClusterMCP HTTP API
 
-## Execution Capabilities (Runner – Advanced Tier)
+| Method | Path | Notes |
+|--------|------|--------|
+| `POST` | `/wardens/register` | Capability registration (JSON file store) |
+| `GET` | `/wardens/nodes` | Map of node → high-level caps |
+| `GET` | `/wardens/nodes/{node}/capabilities` | Full caps document |
+| `GET` | `/wardens/capabilities` | Union of all collector/runner cap strings |
+| `POST` | `/wardens/collector/report` | Validated collector report (`CollectorReport`) |
+| `GET` | `/wardens/nodes/{node}/report` | Last stored report |
+| `GET` | `/wardens/reports` | Nodes that have a report |
 
-| allowlist_key       | Description                              | Warden Constraints (C)                          | MCP Job Dispatch                          | Discovery                     |
-|---------------------|------------------------------------------|------------------------------------------------|-------------------------------------------|-------------------------------|
-| `service:restart`   | Restart allow-listed systemd services   | seccomp + cgroups + timeout + audit            | `POST /jobs` with signed payload          | Runner allow-list report     |
-| `logs:collect`      | Collect scoped logs / journalctl        | Read-only paths + compression + size limit     | Job result retrieval + audit              | Runner allow-list report     |
-| `compose:restart`   | docker compose restart (scoped projects)| Limited to known compose paths                 | Signed job + result                       | Runner allow-list report     |
-| `config:safe-read`  | Read-only access to approved configs    | Explicit path allow-list + hash verification   | Job returns content snippet               | Runner allow-list report     |
-| `diagnostics:run`   | Pre-approved diagnostic commands        | seccomp + resource limits                      | Job execution + full audit log            | Runner allow-list report     |
+Persistence: `WARDENS_DATA_DIR` (default `/var/lib/clustermcp/wardens`) — `capabilities/*.json`, `reports/*.json`.
 
-## Capability Report Format (sent by Warden on connect)
+### Collector binary (`wardens/build/collector`)
+
+| Capability | Status | Behavior |
+|------------|--------|----------|
+| `lxc:full` | **MVP** | Enumerate `/etc/pve/lxc/*.conf` (up to 64) |
+| `permissions:audit` | **MVP** | `stat` + `access` on `/etc/pve/lxc` |
+| Register + report push | **MVP** | Env: `CLUSTERMCP_URL`, `WARDEN_NODE`, optional `MCP_API_KEY` |
+
+### Runner binary (`wardens/build/runner`)
+
+| Status | Notes |
+|--------|--------|
+| **Skeleton only** | No signing, seccomp, or job execution. **Do not enable in production.** |
+
+## Target state (not shipped)
+
+### Future collector capabilities
+
+| Capability | Description |
+|------------|-------------|
+| `cephfs:mapping` | Subvolumes, host ownership, quotas |
+| `docker:status` | Compose projects on known paths |
+| `troubleshoot:bundle` | Aggregated diagnostics |
+
+### Future runner allow-list (signed jobs only)
+
+| allowlist_key | Description |
+|---------------|-------------|
+| `service:restart` | Restart allow-listed systemd units |
+| `logs:collect` | Scoped journal/log collection |
+| `compose:restart` | Scoped compose restart |
+| `config:safe-read` | Read approved config paths |
+| `diagnostics:run` | Pre-approved diagnostic commands |
+
+### Capability report format (register body — shipped)
 
 ```json
 {
   "node": "pvenodeone",
-  "warden_version": "0.1",
-  "collector_caps": ["lxc:full", "cephfs:mapping", "docker:status", "permissions:audit"],
-  "runner_allowlist": ["service:restart", "logs:collect", "compose:restart"],
-  "seccomp_profile": "strict-v1",
-  "resource_limits": {"max_mem_mb": 256, "max_cpu_percent": 50, "max_time_s": 300},
-  "last_seen": "2026-09-29T..."
+  "warden_version": "0.2.0",
+  "collector_caps": ["lxc:full", "permissions:audit"],
+  "runner_allowlist": [],
+  "seccomp_profile": "none",
+  "resource_limits": {"max_mem_mb": 256}
 }
 ```
 
-MCP stores this and exposes:
-- `GET /wardens/nodes` — list all with caps
-- `GET /wardens/nodes/{node}/capabilities`
-- `GET /wardens/capabilities` — global view of what is possible
+## Cross-cutting (planned)
 
-## Additional Cross-Cutting
 - `self:update` — signed binary self-update
-- `metrics:export` — Prometheus scrape/push
-- `audit:stream` — real-time job and visibility audit feed
+- `metrics:export` — Prometheus
+- `audit:stream` — job/visibility audit feed
+- mTLS between Warden and ClusterMCP
 
-This structure ensures the MCP always knows exactly what each Warden can provide before requesting data or dispatching jobs.
+See `INSTALL-NODE.md` for lab install and `../IMPLEMENTATION.md` for phasing.

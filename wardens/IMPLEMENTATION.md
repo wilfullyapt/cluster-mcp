@@ -1,64 +1,58 @@
 # Wardens Implementation Plan (ClusterMCP Visibility Upgrade)
 
-**Date**: 2026-09-29 (paths refreshed 2026-10-21)
-**Status**: Locked. All pins confirmed (C static binaries, nested mono-repo until OpenKEEP extract, collector vs runner split, signing model, Stronghold dogfood first).
-**SoR (near-term)**: `/root/seneschal/repos/clustermcp/wardens/` (nested under ClusterMCP checkout; GitHub slug still `proxmox-mcp` — intentional dual name until Wil renames)
-**Central integration**: ClusterMCP Python FastAPI (LXC 106 historically; ops path Lamassu-owned)
+**Date**: 2026-09-29 (MVP progress 2026-10-21)  
+**Status**: Phase 0 complete; **Phase 1 collector MVP** in progress for home-lab dogfood.  
+**SoR (near-term)**: `/root/seneschal/repos/clustermcp/wardens/` (nested under ClusterMCP; GitHub slug still `proxmox-mcp` until Wil renames)  
+**Central integration**: ClusterMCP Python FastAPI (`routers/wardens.py`)  
 **ADR**: `reliquary/domains/shipyard/adr/0002-wardens-vs-clustermcp.md`
 
-## Goals (recap)
-Deliver the 5 visibility areas via per-node C agents (Wardens) so the central MCP can see everything inside LXCs, host/container permissions, CephFS mappings, Docker status, etc., without SSH.
+## Goals
+
+Per-node **C binaries** on each Proxmox host give ClusterMCP host-local visibility (LXC conf, permissions, later CephFS/Docker) and eventually **limited** signed mutate via runner — without interactive SSH for routine status.
+
+**Not** a Proxmox VE marketplace/UI add-on. Packaging may later be a `.deb`; runtime is systemd node agent.
 
 ## Components
-- **collector/**: Read-only C binary (systemd service). Gathers and serves/pushes the 5 visibility datasets.
-- **runner/**: Restricted execution C binary (separate systemd service). Signed-job only.
-- **shared/**: Common headers, data models (C structs + JSON schemas), signing helpers, protocol.
-- **scripts/**: node-join.sh, build scripts, signing wrappers.
-- **build/**: Makefiles, musl/zig cross-compile setup for static binaries.
-- **docs/**: Runbooks, allow-list examples, threat model.
 
-## Phase 0 (now) – Data Models & Contracts
-1. Define the 5 visibility areas as stable C structs + JSON schema (for MCP API).
-   - LXC: config, mounts, idmaps, UID/GID mappings, status.
-   - CephFS: subvolumes, host-side ownership/permissions, quotas.
-   - Docker: compose projects, container status, networks/volumes for known paths.
-   - Permissions/UID: effective UID mapping, capability checks, ownership audits.
-   - Troubleshooting bundles: aggregated diagnostics (logs, resource usage, error states).
-2. Define job schema (for runner).
-3. Define wire protocol (mTLS + JSON or simple binary framing).
-4. Create shared/visibility.h and shared/job.h.
+- **collector/**: Read-oriented C binary. Pushes register + report to ClusterMCP.
+- **runner/**: Restricted execution C binary (signed-job only) — **skeleton only in MVP**.
+- **shared/**: C structs (`visibility.h`, `job.h`).
+- **build/**: Makefile (`gcc` default; `STATIC=1 CC=musl-gcc` optional).
+- **docs/**: CAPABILITIES (shipped vs planned), INSTALL-NODE, systemd units.
 
-## Phase 1 – Collector Core
-- Static C binary using libcurl or simple socket for MCP communication.
-- Systemd unit template.
-- node-join.sh that installs binary + registers.
-- Endpoints in central MCP to consume collector data.
+## Phase status
 
-## Phase 2 – Runner Core
-- Job verification (signature + allow-list).
-- seccomp-bpf filter (minimal syscall set).
-- Resource limits via cgroups or prlimit.
-- Full audit logging back to MCP.
-- Small allow-list starter set (restart services, log collection, safe reads).
+| Phase | Status |
+|-------|--------|
+| 0 Data models & contracts | **Done** — headers + Pydantic `CollectorReport` |
+| 1 Collector core MVP | **Done for lab** — multi-LXC parse, env URL/node, register+report, file store API, systemd timer templates |
+| 2 Runner core | **Not started** — skeleton only |
+| 3 CephFS/Docker collectors | **Not started** |
+| OpenKEEP extract | **Deferred** until contracts stabilize |
 
-## Build & Deployment
-- Static linking with musl libc (or zig cc) for PVE node compatibility.
-- Signing: minisign or ed25519 (MCP holds private key).
-- Deployment: systemd on each PVE node; central MCP polls or receives pushes.
-- **Ops boundary:** Hephaestus builds artifacts; Lamassu deploys to PVE nodes (not this doc’s checkout path).
+## Build & deployment
+
+```bash
+cd wardens/build && make collector
+```
+
+- Dynamic `gcc` + libcurl for lab; static musl optional for PVE portability.
+- **Ops:** Hephaestus builds; Lamassu installs on PVE nodes (see `docs/INSTALL-NODE.md`).
 
 ## Integration with ClusterMCP
-- New routers in central MCP (wardens_collector.py, wardens_jobs.py).
-- Reuse existing auth, logging, ActionResponse model.
-- Metrics exposed to hermes-monitor.
+
+Shipped router: `routers/wardens.py` (not separate wardens_collector/jobs modules yet).  
+Auth: optional global `MCP_API_KEY` middleware.  
+Store: `WARDENS_DATA_DIR` JSON files.
 
 ## Packaging
-- Near term: stay nested under the ClusterMCP repo (`wardens/`).
-- Standalone `/root/seneschal/repos/wardens` is a **pointer checkout only** (no parallel SoR) until OpenKEEP extract of `wilfullyapt/wardens`.
-- Do not recreate `/root/butler/stronghold/...` paths.
 
-## Next Immediate Steps
-1. Keep data model structs in shared/ headers current.
-2. Expand collector beyond LXC + basic permission demo.
-3. Wire central MCP consumer endpoints + registration.
-4. Extract public OpenKEEP repo only after collector/runner contracts stabilize.
+- Near term: nested under ClusterMCP repo (`wardens/`).
+- Standalone `/root/seneschal/repos/wardens` is **pointer-only** (ADR 0002).
+
+## Next after lab dogfood
+
+1. Ceph thin collector slice that matches home-lab pain points.  
+2. Heartbeat/`last_seen` on register.  
+3. Runner Phase 2 only after collector proves useful on all nodes.  
+4. OpenKEEP public extract when API freezes.
