@@ -24,7 +24,7 @@ int collect_permission_diag(permission_diag_t *out, const char *target_path) {
     out->writable = (access(target_path, W_OK) == 0);
     out->executable = (access(target_path, X_OK) == 0);
 
-    strncpy(out->permissions, "from-stat", sizeof(out->permissions) - 1);
+    snprintf(out->capabilities, sizeof(out->capabilities), "mode=%o", (unsigned)(st.st_mode & 07777));
     strncpy(out->mapping_note, "basic stat + access check", sizeof(out->mapping_note) - 1);
 
     printf("[collector] Permission diag for %s (uid=%s, readable=%d)\n",

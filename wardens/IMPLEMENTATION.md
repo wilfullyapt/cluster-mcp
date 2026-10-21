@@ -1,9 +1,10 @@
 # Wardens Implementation Plan (ClusterMCP Visibility Upgrade)
 
-**Date**: 2026-09-29
-**Status**: Locked. All pins confirmed (C static binaries, wardens/ mono-repo, collector vs runner split, signing model, Stronghold dogfood first).
-**Repo base**: /root/butler/stronghold/wardens/
-**Central integration**: Extend existing /root/butler/stronghold/clustermcp (Python FastAPI in LXC 106).
+**Date**: 2026-09-29 (paths refreshed 2026-10-21)
+**Status**: Locked. All pins confirmed (C static binaries, nested mono-repo until OpenKEEP extract, collector vs runner split, signing model, Stronghold dogfood first).
+**SoR (near-term)**: `/root/seneschal/repos/proxmox-mcp/wardens/` (nested under ClusterMCP checkout; GitHub remote still `proxmox-mcp` until rename lands)
+**Central integration**: ClusterMCP Python FastAPI (LXC 106 historically; ops path Lamassu-owned)
+**ADR**: `reliquary/domains/shipyard/adr/0002-wardens-vs-clustermcp.md`
 
 ## Goals (recap)
 Deliver the 5 visibility areas via per-node C agents (Wardens) so the central MCP can see everything inside LXCs, host/container permissions, CephFS mappings, Docker status, etc., without SSH.
@@ -44,16 +45,20 @@ Deliver the 5 visibility areas via per-node C agents (Wardens) so the central MC
 - Static linking with musl libc (or zig cc) for PVE node compatibility.
 - Signing: minisign or ed25519 (MCP holds private key).
 - Deployment: systemd on each PVE node; central MCP polls or receives pushes.
+- **Ops boundary:** Hephaestus builds artifacts; Lamassu deploys to PVE nodes (not this doc’s checkout path).
 
-## Integration with clustermcp
+## Integration with ClusterMCP
 - New routers in central MCP (wardens_collector.py, wardens_jobs.py).
 - Reuse existing auth, logging, ActionResponse model.
 - Metrics exposed to hermes-monitor.
 
-## Next Immediate Steps
-1. Define data model structs (this file will be updated with them).
-2. Create initial shared/ headers.
-3. Skeleton collector main.c with registration flow.
-4. Update central MCP with first consumer endpoint.
+## Packaging
+- Near term: stay nested under the ClusterMCP repo (`wardens/`).
+- Standalone `/root/seneschal/repos/wardens` is a **pointer checkout only** (no parallel SoR) until OpenKEEP extract of `wilfullyapt/wardens`.
+- Do not recreate `/root/butler/stronghold/...` paths.
 
-All code stays under /root/butler/stronghold/wardens/ until OpenKEEP extraction.
+## Next Immediate Steps
+1. Keep data model structs in shared/ headers current.
+2. Expand collector beyond LXC + basic permission demo.
+3. Wire central MCP consumer endpoints + registration.
+4. Extract public OpenKEEP repo only after collector/runner contracts stabilize.
