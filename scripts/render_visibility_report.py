@@ -44,15 +44,18 @@ def http_get_json(url: str, timeout: float = 30.0) -> tuple[Any | None, str | No
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://192.168.0.233:8000", help="ClusterMCP base URL")
-    parser.add_argument("--out", required=True, help="Output PNG path (page mode writes -01/-02/-03 siblings)")
+    parser.add_argument("--out", required=True, help="Output PNG path")
     parser.add_argument("--json-out", default="", help="Optional JSON report path")
-    parser.add_argument("--pages", action="store_true", default=True, help="Write 3 full-width pages (default)")
-    parser.add_argument("--single", action="store_true", help="Write one tall single image instead of pages")
+    parser.add_argument("--pages", action="store_true", help="Write 3 full-width pages instead of one image")
+    parser.add_argument("--single", action="store_true", default=True, help="Write one tall single image (default)")
     parser.add_argument("--width", type=int, default=3200, help="Export width in pixels")
     parser.add_argument("--body-css", type=float, default=22.0, help="Target body CSS-px at 390px phone column")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
-    use_pages = not args.single
+    use_pages = bool(args.pages) and not args.single
+    # argparse can't easily do pages XOR single; prefer --pages when explicitly set
+    if args.pages:
+        use_pages = True
 
     probe_errors: dict[str, str] = {}
 

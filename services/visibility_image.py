@@ -485,7 +485,7 @@ def _section_status_from_rows(statuses: list[Any]) -> tuple[str, tuple[int, int,
     return "—", MUTED
 
 
-def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
+def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, include_footer: bool = True) -> None:
     overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
     label, color = _traffic(overall)
     cluster = report.get("cluster") or {}
@@ -604,7 +604,8 @@ def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
             ],
             row_h=140,
         )
-    c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · {page_label}")
+    if include_footer:
+        c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · {page_label}")
 
 
 def _fill_containers(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
@@ -710,11 +711,10 @@ def render_visibility_image(
     width: int = DEFAULT_WIDTH,
     target_body_css: float = TARGET_BODY_CSS_PX,
 ) -> bytes:
-    """Single-image fallback: overview page only (prefer render_visibility_pages)."""
+    """Single full report PNG (default deliverable)."""
     width = max(BASE_WIDTH, int(width))
     c = _Canvas(width=width, target_body_css=target_body_css)
-    _fill_overview(c, report, "single overview")
-    # append containers + storage onto one tall card for API compatibility
+    _fill_overview(c, report, "full report", include_footer=False)
     containers = list(report.get("containers") or [])
     storage = list(report.get("storage") or [])
     warnings = list(report.get("warnings") or [])
@@ -752,5 +752,5 @@ def render_visibility_image(
     else:
         c.section_header("Attention", "OK", OK, subtitle="No warnings")
         c.bullet_block([("No warnings from live probes.", OK)])
-    c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · single")
+    c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · single image")
     return _png_bytes(c.render())
