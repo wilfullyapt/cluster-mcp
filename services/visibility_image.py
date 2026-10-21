@@ -186,10 +186,24 @@ class _Canvas:
 
     def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
         """items: (label, value, optional status color for value)."""
-        self.elements.append(("chips", self.y, items))
-        # 2 rows of chips roughly
-        rows = max(1, (len(items) + 1) // 2)
-        self.y += rows * 44 + 12
+        # Measure real wrapped height so we don't leave a void under sparse chip rows.
+        x = 0
+        rows = 1
+        row_h = 0
+        max_w = self.content_w
+        for label, value, vcolor in items:
+            text = f"{label}  {value}"
+            tw, th = _text_size(self.d0, text, self.body_f)
+            chip_w = tw + (36 if vcolor else 28)
+            chip_h = th + 18
+            row_h = max(row_h, chip_h)
+            if x + chip_w > max_w and x > 0:
+                rows += 1
+                x = 0
+            x += chip_w + 10
+        total_h = rows * (row_h + 10) + 4
+        self.elements.append(("chips", self.y, items, total_h))
+        self.y += total_h + 8
 
     def table(
         self,
@@ -285,18 +299,21 @@ class _Canvas:
                     draw.text((self.pad + 46, y + 36), subtitle, font=self.small_f, fill=MUTED)
                 continue
             if kind == "chips":
-                _, y, items = el
+                _, y, items, _total_h = el
                 x = self.pad
                 row_y = y
                 max_x = self.width - self.pad
+                row_h = 0
                 for label, value, vcolor in items:
                     text = f"{label}  {value}"
                     tw, th = _text_size(draw, text, self.body_f)
-                    chip_w = tw + 28
+                    chip_w = tw + (36 if vcolor else 28)
                     chip_h = th + 18
-                    if x + chip_w > max_x:
+                    if x + chip_w > max_x and x > self.pad:
                         x = self.pad
-                        row_y += chip_h + 10
+                        row_y += max(row_h, chip_h) + 10
+                        row_h = 0
+                    row_h = max(row_h, chip_h)
                     fill = (32, 38, 56)
                     draw.rounded_rectangle((x, row_y, x + chip_w, row_y + chip_h), radius=10, fill=fill, outline=LINE, width=1)
                     if vcolor:
