@@ -198,115 +198,113 @@ class _Canvas:
         self.chip_f = _font(max(int(self.body_px * 0.75), 40))
         self.attn_f = _font(max(int(self.body_px * 0.5), 30))
         self.icon = max(28, int(self.body_px * 0.45))
-                # Airy vertical rhythm (Wil: still too compact) while keeping body large
-                self.row_h = max(72, int(self.body_px * 1.55))
-                self.header_h = max(58, int(self.body_px * 1.25))
-                self.section_h = max(72, int(self.body_px * 1.5))
-                self.scratch = Image.new("RGB", (self.width, max(120, self.body_px * 2)), BG)
-                self.d0 = ImageDraw.Draw(self.scratch)
+        self.row_h = max(72, int(self.body_px * 1.55))
+        self.header_h = max(58, int(self.body_px * 1.25))
+        self.section_h = max(72, int(self.body_px * 1.5))
+        self.scratch = Image.new("RGB", (self.width, max(120, self.body_px * 2)), BG)
+        self.d0 = ImageDraw.Draw(self.scratch)
 
-            def u(self, n: float | int) -> int:
-                """Scale a base design unit by type density (not merely canvas width)."""
-                return max(1, int(round(float(n) * self.scale)))
+    def u(self, n: float | int) -> int:
+        """Scale a base design unit by type density (not merely canvas width)."""
+        return max(1, int(round(float(n) * self.scale)))
 
-            def gap(self, n: int = 56) -> None:
-                g = max(self.u(n), int(self.body_px * 0.35))
-                self.elements.append(("gap", g))
-                self.y += g
+    def gap(self, n: int = 56) -> None:
+        g = max(self.u(n), int(self.body_px * 0.35))
+        self.elements.append(("gap", g))
+        self.y += g
 
-            def title_block(self, title: str, meta: str, overall_label: str, overall_color: tuple[int, int, int]) -> None:
-                self.elements.append(("title", self.y, title, meta, overall_label, overall_color))
-                self.y += int(self.body_px * 4.4) + 28
+    def title_block(self, title: str, meta: str, overall_label: str, overall_color: tuple[int, int, int]) -> None:
+        self.elements.append(("title", self.y, title, meta, overall_label, overall_color))
+        self.y += int(self.body_px * 4.4) + 28
 
-            def section_header(self, name: str, status_label: str, status_color: tuple[int, int, int], subtitle: str = "") -> None:
-                h = self.section_h + (int(self.body_px * 0.7) if subtitle else 0)
-                self.elements.append(("section", self.y, name, status_label, status_color, subtitle, h))
-                self.y += h + int(self.body_px * 0.45)
+    def section_header(self, name: str, status_label: str, status_color: tuple[int, int, int], subtitle: str = "") -> None:
+        h = self.section_h + (int(self.body_px * 0.7) if subtitle else 0)
+        self.elements.append(("section", self.y, name, status_label, status_color, subtitle, h))
+        self.y += h + int(self.body_px * 0.45)
 
-            def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
+    def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
+        x = 0
+        rows = 1
+        row_h = 0
+        max_w = self.content_w
+        for label, value, vcolor in items:
+            text = f"{label}  {value}"
+            tw, th = _text_size(self.d0, text, self.chip_f)
+            chip_w = tw + (int(self.body_px * 0.7) if vcolor else int(self.body_px * 0.45))
+            chip_h = th + int(self.body_px * 0.45)
+            row_h = max(row_h, chip_h)
+            if x + chip_w > max_w and x > 0:
+                rows += 1
                 x = 0
-                rows = 1
-                row_h = 0
-                max_w = self.content_w
-                for label, value, vcolor in items:
-                    text = f"{label}  {value}"
-                    tw, th = _text_size(self.d0, text, self.chip_f)
-                    chip_w = tw + (int(self.body_px * 0.7) if vcolor else int(self.body_px * 0.45))
-                    chip_h = th + int(self.body_px * 0.45)
-                    row_h = max(row_h, chip_h)
-                    if x + chip_w > max_w and x > 0:
-                        rows += 1
-                        x = 0
-                    x += chip_w + int(self.body_px * 0.22)
-                total_h = rows * (row_h + int(self.body_px * 0.25)) + 6
-                self.elements.append(("chips", self.y, items, total_h))
-                self.y += total_h + int(self.body_px * 0.4)
+            x += chip_w + int(self.body_px * 0.22)
+        total_h = rows * (row_h + int(self.body_px * 0.25)) + 6
+        self.elements.append(("chips", self.y, items, total_h))
+        self.y += total_h + int(self.body_px * 0.4)
 
-            def table(
-                self,
-                headers: list[str],
-                col_weights: list[float],
-                rows: list[tuple[str, tuple[int, int, int], list[str]]],
-                row_h: int | None = None,
-            ) -> None:
-                rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.45))
-                hh = self.header_h
-                h = hh + max(1, len(rows)) * rh + 12
-                self.elements.append(("table", self.y, headers, col_weights, rows, rh, hh, h))
-                self.y += h + int(self.body_px * 0.4)
+    def table(
+        self,
+        headers: list[str],
+        col_weights: list[float],
+        rows: list[tuple[str, tuple[int, int, int], list[str]]],
+        row_h: int | None = None,
+    ) -> None:
+        rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.45))
+        hh = self.header_h
+        h = hh + max(1, len(rows)) * rh + 12
+        self.elements.append(("table", self.y, headers, col_weights, rows, rh, hh, h))
+        self.y += h + int(self.body_px * 0.4)
 
-            def multiline_rows(
-                self,
-                rows: list[tuple[str, tuple[int, int, int], str, str]],
-                row_h: int = 100,
-                single_line: bool = False,
-            ) -> None:
-                # Airy single-line rows (still multi-col elsewhere to control total height)
-                mult = 1.45 if single_line else 1.85
-                rh = max(int(self.body_px * mult), int(self.row_h * (1.05 if single_line else 1.15)))
-                h = max(1, len(rows)) * rh + 12
-                self.elements.append(("mrows", self.y, rows, rh, h, single_line))
-                self.y += h + int(self.body_px * 0.4)
+    def multiline_rows(
+        self,
+        rows: list[tuple[str, tuple[int, int, int], str, str]],
+        row_h: int = 100,
+        single_line: bool = False,
+    ) -> None:
+        mult = 1.45 if single_line else 1.85
+        rh = max(int(self.body_px * mult), int(self.row_h * (1.05 if single_line else 1.15)))
+        h = max(1, len(rows)) * rh + 12
+        self.elements.append(("mrows", self.y, rows, rh, h, single_line))
+        self.y += h + int(self.body_px * 0.4)
 
-            def multiline_rows_2col(
-                self,
-                rows: list[tuple[str, tuple[int, int, int], str, str]],
-                row_h: int = 100,
-                cols: int = 2,
-                single_line: bool = True,
-            ) -> None:
-                cols = max(2, min(3, int(cols)))
-                mult = 1.45 if single_line else 1.85
-                rh = max(int(self.body_px * mult), int(self.row_h * (1.05 if single_line else 1.15)))
-                if not rows:
-                    self.multiline_rows(rows, row_h=row_h, single_line=single_line)
-                    return
-                chunk = (len(rows) + cols - 1) // cols
-                columns: list[list] = []
-                for i in range(cols):
-                    part = rows[i * chunk : (i + 1) * chunk]
-                    columns.append(part)
-                max_len = max(len(c) for c in columns)
-                for c in columns:
-                    while len(c) < max_len:
-                        c.append(("muted", MUTED, "", ""))
-                h = max_len * rh + 12
-                self.elements.append(("mrowsN", self.y, columns, rh, h, cols, single_line))
-                self.y += h + int(self.body_px * 0.4)
+    def multiline_rows_2col(
+        self,
+        rows: list[tuple[str, tuple[int, int, int], str, str]],
+        row_h: int = 100,
+        cols: int = 2,
+        single_line: bool = True,
+    ) -> None:
+        cols = max(2, min(3, int(cols)))
+        mult = 1.45 if single_line else 1.85
+        rh = max(int(self.body_px * mult), int(self.row_h * (1.05 if single_line else 1.15)))
+        if not rows:
+            self.multiline_rows(rows, row_h=row_h, single_line=single_line)
+            return
+        chunk = (len(rows) + cols - 1) // cols
+        columns: list[list] = []
+        for i in range(cols):
+            part = rows[i * chunk : (i + 1) * chunk]
+            columns.append(part)
+        max_len = max(len(c) for c in columns)
+        for c in columns:
+            while len(c) < max_len:
+                c.append(("muted", MUTED, "", ""))
+        h = max_len * rh + 12
+        self.elements.append(("mrowsN", self.y, columns, rh, h, cols, single_line))
+        self.y += h + int(self.body_px * 0.4)
 
-            def attention_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
-                """Compact Attention: smaller type, one next-step line each."""
-                font = self.attn_f
-                line_h = max(int(self.body_px * 0.95), 40)
-                total = int(self.body_px * 0.3)
-                wrapped_all: list[tuple[list[str], tuple[int, int, int]]] = []
-                max_w = self.content_w - int(self.body_px * 1.2)
-                for text, color in lines:
-                    parts = _wrap(self.d0, text, font, max_w)
-                    wrapped_all.append((parts, color))
-                    total += len(parts) * line_h + int(self.body_px * 0.35)
-                self.elements.append(("attn", self.y, wrapped_all, total, line_h))
-                self.y += total + int(self.body_px * 0.4)
+    def attention_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
+        """Smaller Attention type; one next-step line each."""
+        font = self.attn_f
+        line_h = max(int(self.body_px * 0.95), 40)
+        total = int(self.body_px * 0.3)
+        wrapped_all: list[tuple[list[str], tuple[int, int, int]]] = []
+        max_w = self.content_w - int(self.body_px * 1.2)
+        for text, color in lines:
+            parts = _wrap(self.d0, text, font, max_w)
+            wrapped_all.append((parts, color))
+            total += len(parts) * line_h + int(self.body_px * 0.35)
+        self.elements.append(("attn", self.y, wrapped_all, total, line_h))
+        self.y += total + int(self.body_px * 0.4)
 
     def bullet_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         # legacy path — prefer attention_block for Attention section
@@ -614,20 +612,11 @@ def _attention_next_steps(warnings: list[str]) -> list[str]:
     for w in warnings:
         wl = str(w).lower()
         if "cephfs-immich" in wl or ("storage status unknown" in wl and "immich" in wl):
-            add(
-                "Next: on pvenodetwo + pvenodethree, fix or remove storage "
-                "`cephfs-immich` (PVE → Datacenter → Storage) until status is available"
-            )
+            add("Next: on pvenodetwo + pvenodethree, fix or remove storage `cephfs-immich` (PVE → Datacenter → Storage) until status is available")
         elif "stripped untrusted" in wl or ("osd" in wl and "fixture" in wl):
-            add(
-                "Next: deploy ClusterMCP build with live OSD tree "
-                "(no fallback fixture) so /ceph/osds returns real detail"
-            )
+            add("Next: deploy ClusterMCP build with live OSD tree (no fallback fixture) so /ceph/osds returns real detail")
         elif "per-osd utilization" in wl or "osd tree" in wl or "osd inventory" in wl:
-            add(
-                "Next: verify Ceph OSD tree API from MCP LXC "
-                "(`/nodes/<node>/ceph/osd`) and redeploy fixed CephClient"
-            )
+            add("Next: verify Ceph OSD tree API from MCP LXC (`/nodes/<node>/ceph/osd`) and redeploy fixed CephClient")
         elif "offline nodes" in wl:
             add(f"Next: bring offline node(s) online — {w.split(':',1)[-1].strip()}")
         elif "ceph health" in wl:
@@ -901,7 +890,6 @@ def render_visibility_image(
             f"disk {ct.get('disk_human') or '—'} · up {ct.get('uptime_human') or '—'}{tags}"
         )
         ct_mrows.append((sk, sc, primary, ""))
-    # 2-col lists with airy single-line rows (not 3-col tight pack)
     c.multiline_rows_2col(ct_mrows, cols=2, single_line=True)
     st_statuses = [s.get("status") for s in storage]
     st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
