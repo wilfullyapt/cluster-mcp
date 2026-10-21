@@ -194,10 +194,11 @@ class _Canvas:
         self.mono_f = _font(max(int(self.body_px * 0.88), 48))
         self.small_f = _font(max(int(self.body_px * 0.72), 36))
         self.chip_f = _font(max(int(self.body_px * 0.78), 40))
+        self.attn_f = _font(max(int(self.body_px * 0.55), 28))  # smaller Attention copy
         self.icon = max(28, int(self.body_px * 0.5))
-        self.row_h = max(64, int(self.body_px * 1.55))
-        self.header_h = max(56, int(self.body_px * 1.3))
-        self.section_h = max(68, int(self.body_px * 1.5))
+        self.row_h = max(72, int(self.body_px * 1.7))
+        self.header_h = max(60, int(self.body_px * 1.4))
+        self.section_h = max(76, int(self.body_px * 1.65))
         self.scratch = Image.new("RGB", (self.width, max(120, self.body_px * 2)), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
@@ -216,9 +217,9 @@ class _Canvas:
         self.y += int(self.body_px * 4.3) + self.u(28)
 
     def section_header(self, name: str, status_label: str, status_color: tuple[int, int, int], subtitle: str = "") -> None:
-        h = self.section_h + (int(self.body_px * 0.7) if subtitle else 0)
+        h = self.section_h + (int(self.body_px * 0.75) if subtitle else 0)
         self.elements.append(("section", self.y, name, status_label, status_color, subtitle, h))
-        self.y += h + int(self.body_px * 0.4)
+        self.y += h + int(self.body_px * 0.5)
 
     def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
         x = 0
@@ -229,15 +230,15 @@ class _Canvas:
             text = f"{label}  {value}"
             tw, th = _text_size(self.d0, text, self.chip_f)
             chip_w = tw + (int(self.body_px * 0.75) if vcolor else int(self.body_px * 0.5))
-            chip_h = th + int(self.body_px * 0.45)
+            chip_h = th + int(self.body_px * 0.5)
             row_h = max(row_h, chip_h)
             if x + chip_w > max_w and x > 0:
                 rows += 1
                 x = 0
-            x += chip_w + int(self.body_px * 0.25)
-        total_h = rows * (row_h + int(self.body_px * 0.25)) + 6
+            x += chip_w + int(self.body_px * 0.28)
+        total_h = rows * (row_h + int(self.body_px * 0.3)) + 8
         self.elements.append(("chips", self.y, items, total_h))
-        self.y += total_h + int(self.body_px * 0.35)
+        self.y += total_h + int(self.body_px * 0.45)
 
     def table(
         self,
@@ -246,22 +247,21 @@ class _Canvas:
         rows: list[tuple[str, tuple[int, int, int], list[str]]],
         row_h: int | None = None,
     ) -> None:
-        rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.45))
+        rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.55))
         hh = self.header_h
-        h = hh + max(1, len(rows)) * rh + 10
+        h = hh + max(1, len(rows)) * rh + 12
         self.elements.append(("table", self.y, headers, col_weights, rows, rh, hh, h))
-        self.y += h + int(self.body_px * 0.4)
+        self.y += h + int(self.body_px * 0.5)
 
     def multiline_rows(
         self,
         rows: list[tuple[str, tuple[int, int, int], str, str]],
         row_h: int = 100,
     ) -> None:
-        # Two-line rows with comfortable vertical padding
-        rh = max(int(self.body_px * 1.85), int(self.row_h * 1.15))
-        h = max(1, len(rows)) * rh + 8
+        rh = max(int(self.body_px * 2.05), int(self.row_h * 1.2))
+        h = max(1, len(rows)) * rh + 10
         self.elements.append(("mrows", self.y, rows, rh, h))
-        self.y += h + int(self.body_px * 0.35)
+        self.y += h + int(self.body_px * 0.45)
 
     def multiline_rows_2col(
         self,
@@ -271,7 +271,7 @@ class _Canvas:
     ) -> None:
         """Multi-column list pack — keeps width Discord-safe while staying airy."""
         cols = max(2, min(3, int(cols)))
-        rh = max(int(self.body_px * 1.85), int(self.row_h * 1.15))
+        rh = max(int(self.body_px * 2.05), int(self.row_h * 1.2))
         if not rows:
             self.multiline_rows(rows, row_h=row_h)
             return
@@ -284,21 +284,27 @@ class _Canvas:
         for c in columns:
             while len(c) < max_len:
                 c.append(("muted", MUTED, "", ""))
-        h = max_len * rh + 8
+        h = max_len * rh + 10
         self.elements.append(("mrowsN", self.y, columns, rh, h, cols))
-        self.y += h + int(self.body_px * 0.3)
+        self.y += h + int(self.body_px * 0.4)
+
+    def attention_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
+        """Compact Attention: smaller type, one next-step line each."""
+        font = self.attn_f
+        line_h = max(int(self.body_px * 0.85), 36)
+        total = int(self.body_px * 0.2)
+        wrapped_all: list[tuple[list[str], tuple[int, int, int]]] = []
+        max_w = self.content_w - int(self.body_px * 1.2)
+        for text, color in lines:
+            parts = _wrap(self.d0, text, font, max_w)
+            wrapped_all.append((parts, color))
+            total += len(parts) * line_h + int(self.body_px * 0.25)
+        self.elements.append(("attn", self.y, wrapped_all, total, line_h))
+        self.y += total + int(self.body_px * 0.3)
 
     def bullet_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
-        total = self.u(16)
-        wrapped_all: list[tuple[list[str], tuple[int, int, int]]] = []
-        max_w = self.content_w - self.u(90)
-        line_h = self.u(60)
-        for text, color in lines:
-            parts = _wrap(self.d0, text, self.body_f, max_w)
-            wrapped_all.append((parts, color))
-            total += len(parts) * line_h + self.u(20)
-        self.elements.append(("bullets", self.y, wrapped_all, total, line_h))
-        self.y += total + self.u(20)
+        # legacy path — prefer attention_block for Attention section
+        self.attention_block(lines)
 
     def footer(self, text: str) -> None:
         self.elements.append(("footer", text))
@@ -543,8 +549,10 @@ class _Canvas:
                     ry += rh
                 draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
                 continue
-            if kind == "bullets":
+            if kind in ("bullets", "attn"):
                 _, y, wrapped_all, _total, line_h = el
+                font = self.attn_f if kind == "attn" else self.body_f
+                icon_sz = max(18, int(self.body_px * 0.35)) if kind == "attn" else u(34)
                 yy = y
                 for parts, color in wrapped_all:
                     for i, part in enumerate(parts):
@@ -552,17 +560,17 @@ class _Canvas:
                             _draw_status_icon(
                                 draw,
                                 self.pad + u(8),
-                                yy + u(6),
+                                yy + max(2, int(line_h * 0.1)),
                                 "warn" if color == WARN else ("bad" if color == BAD else "ok"),
                                 color,
-                                size=u(34),
+                                size=icon_sz,
                             )
                             body = part.lstrip("• ").lstrip()
-                            draw.text((self.pad + u(56), yy), f"• {body}", font=self.body_f, fill=color)
+                            draw.text((self.pad + u(48), yy), f"→ {body}", font=font, fill=color)
                         else:
-                            draw.text((self.pad + u(56), yy), f"  {part}", font=self.body_f, fill=color)
+                            draw.text((self.pad + u(48), yy), f"  {part}", font=font, fill=color)
                         yy += line_h
-                    yy += u(20)
+                    yy += max(8, int(self.body_px * 0.2))
                 continue
             if kind == "footer":
                 text = el[1]
@@ -570,6 +578,38 @@ class _Canvas:
                 draw.text((self.pad, height - u(64)), text, font=self.small_f, fill=MUTED)
         return img
 
+
+def _attention_next_steps(warnings: list[str]) -> list[str]:
+    """Map raw warnings to a single concrete next step each (no diagnosis essays)."""
+    steps: list[str] = []
+    seen: set[str] = set()
+
+    def add(step: str) -> None:
+        s = step.strip()
+        if s and s not in seen:
+            seen.add(s)
+            steps.append(s)
+
+    for w in warnings:
+        wl = str(w).lower()
+        if "cephfs-immich" in wl or ("storage status unknown" in wl and "immich" in wl):
+            add("Next: on pvenodetwo + pvenodethree, fix or remove storage `cephfs-immich` (PVE → Datacenter → Storage) until status is available")
+        elif "stripped untrusted" in wl or ("osd" in wl and "fixture" in wl):
+            add("Next: deploy ClusterMCP build with live OSD tree (no fallback fixture) so /ceph/osds returns real detail")
+        elif "per-osd utilization" in wl or "osd tree" in wl or "osd inventory" in wl:
+            add("Next: verify Ceph OSD tree API from MCP LXC (`/nodes/<node>/ceph/osd`) and redeploy fixed CephClient")
+        elif "offline nodes" in wl:
+            add(f"Next: bring offline node(s) online — {w.split(':',1)[-1].strip()}")
+        elif "ceph health" in wl:
+            add(f"Next: inspect Ceph health detail on a mon (`ceph -s`) — {w}")
+        elif "degraded" in wl or ("incomplete" in wl and "pg" in wl):
+            add("Next: run `ceph pg dump_stuck` / check recovering PGs until active+clean")
+        elif "probe error" in wl:
+            add(f"Next: restore failing probe path — {w}")
+        else:
+            add(f"Next: {w}")
+
+    return steps or ["Next: no open attention items"]
 
 
 def _section_status_from_rows(statuses: list[Any]) -> tuple[str, tuple[int, int, int]]:
@@ -762,11 +802,12 @@ def _fill_storage(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
     c.multiline_rows(st_mrows, row_h=100)
 
     if warnings:
-        c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s)")
-        c.bullet_block([(str(w), WARN) for w in warnings])
+        steps = _attention_next_steps(warnings)
+        c.section_header("Attention", "ATTN", WARN, subtitle="one next step each")
+        c.attention_block([(s, WARN) for s in steps])
     else:
-        c.section_header("Attention", "OK", OK, subtitle="No warnings")
-        c.bullet_block([("No warnings from live probes.", OK)])
+        c.section_header("Attention", "OK", OK, subtitle="No open next steps")
+        c.attention_block([("Next: none — cluster probes clean", OK)])
     c.footer(f"Stronghold · live probes · {c.width}px · body {c.body_px}px · {page_label}")
 
 
@@ -846,10 +887,11 @@ def render_visibility_image(
         st_mrows.append((sk, sc, primary, secondary))
     c.multiline_rows_2col(st_mrows, row_h=100, cols=2)
     if warnings:
-        c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s)")
-        c.bullet_block([(str(w), WARN) for w in warnings])
+        steps = _attention_next_steps(warnings)
+        c.section_header("Attention", "ATTN", WARN, subtitle="one next step each")
+        c.attention_block([(s, WARN) for s in steps])
     else:
-        c.section_header("Attention", "OK", OK, subtitle="No warnings")
-        c.bullet_block([("No warnings from live probes.", OK)])
+        c.section_header("Attention", "OK", OK, subtitle="No open next steps")
+        c.attention_block([("Next: none — cluster probes clean", OK)])
     c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · single image")
     return _png_bytes(c.render())
