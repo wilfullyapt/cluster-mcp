@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-29 (MVP progress 2026-10-21)  
 **Status**: Phase 0 complete; **Phase 1 collector MVP** in progress for home-lab dogfood.  
-**SoR (near-term)**: `/root/seneschal/repos/clustermcp/wardens/` (nested under ClusterMCP; GitHub slug still `proxmox-mcp` until Wil renames)  
+**SoR (near-term)**: `/root/seneschal/repos/clustermcp/wardens/` (nested under ClusterMCP; GitHub `wilfullyapt/cluster-mcp`)  
 **Central integration**: ClusterMCP Python FastAPI (`routers/wardens.py`)  
 **ADR**: `reliquary/domains/shipyard/adr/0002-wardens-vs-clustermcp.md`
 
