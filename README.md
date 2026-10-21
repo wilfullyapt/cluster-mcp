@@ -95,7 +95,8 @@ docker compose up -d --build
 - `GET /resources?type=vm|container|storage`
 - `GET /tasks/recent`
 - `GET /health/snapshot` ← aggregated report
-- `GET /report/visibility` ← rich per-node inventory, Ceph PG/OSD health, warnings, Markdown sections + graph-friendly data for Discord/Hermes
+- `GET /report/visibility` ← rich per-node inventory, Ceph PG/OSD health, warnings, Markdown sections + graph-friendly data for Discord/Hermes (live probes only)
+- `GET /report/visibility.png` ← single PNG status card from the same live probes (no recalled metrics)
 - `POST /admin/update` (self-update endpoint for autonomous maintenance)
 - `POST /vm/{node}/{vmid}/status/{start|stop|reboot|shutdown}` (gated)
 
@@ -104,17 +105,24 @@ All return `ActionResponse {success, data, error}`. PVE calls use the configured
 
 ## Visibility Reports (feature/stronghold-mcp-visibility-report)
 
-**`/report/visibility`** returns rich aggregated data optimized for Discord embeds and Hermes digests:
+**`/report/visibility`** returns rich aggregated data optimized for Discord embeds and Hermes digests.
+**`/report/visibility.png`** returns one PNG card with the same facts.
+
+Data policy: **live probes only**. Missing Ceph OSD detail is omitted or warned — never filled from memory or hardcoded fixtures.
 
 - Per-node inventory (status, CPU/mem, VM/CT counts, uptime)
-- Resource summary by type
+- Container inventory from `cluster/resources`
+- Resource summary by type + storage status rows
 - Ceph health + PG state counts (graph data)
-- OSD summary (up/down/in/out)
-- Actionable warnings list
+- OSD summary (up/down/in/out) from live status/tree; per-OSD rows only when the OSD tree probe returns them
+- Actionable warnings list (including probe errors)
 - Pre-formatted Markdown tables/sections for immediate posting
 - Raw graph payloads (pg_states, node metrics)
 
-Example usage in Hermes: call and render the `markdown` or `summary` sections.
+Example usage in Hermes:
+- JSON: `GET /report/visibility` → use `summary` / `markdown` / `containers`
+- Image: `GET /report/visibility.png` → post the PNG as the Discord report
+- Offline render against a running MCP: `python3 scripts/render_visibility_report.py --base-url http://<mcp>:8000 --out report.png`
 
 **Full Working Surface (current endpoints + privs)**:
 - `/health`, `/cluster/status`, `/nodes`, `/resources`, `/ceph/status`, `/ceph/osds`, `/tasks/recent`, `/health/snapshot`, `/report/visibility`: Read (Sys.Audit, Datastore.Audit, etc.)

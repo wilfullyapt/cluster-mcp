@@ -1,7 +1,7 @@
 """CephClient with Strategy + Adapter pattern.
 
-Primary: Real PVE API calls via existing pve_client session (returns live 5 OSD data)
-Fallback: placeholder data only on complete failure
+Primary: Real PVE API calls via existing pve_client session.
+Never invents OSD rows or health — failures surface as errors or empty live results.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import requests
 
 from exceptions import CephConnectionError
 from pve_client import get_session
+from services.visibility_builder import extract_osds_from_tree
 
 
 class CephBackend(ABC):
@@ -35,125 +36,105 @@ class CephBackend(ABC):
 
 
 class PveApiCephAdapter(CephBackend):
-    """Real Ceph data via PVE API (using token-authenticated requests session)."""
+    """Real Ceph data via PVE API (token-authenticated requests session)."""
 
     def __init__(self):
         self.sess: requests.Session = get_session()
         self.pve_host = os.getenv("PVE_HOST", "https://192.168.0.241:8006").rstrip("/")
 
-    def _get(self, path: str) -> dict[str, Any]:
+    def _get(self, path: str) -> Any:
         try:
-            r = self.sess.get(f"{self.pve_host}/api2/json{path}")
+            r = self.sess.get(f"{self.pve_host}/api2/json{path}", timeout=30)
             r.raise_for_status()
-            return r.json().get("data", {})
-        except Exception as exc:
+            return r.json().get("data")
+        except Exception as exc:  # noqa: BLE001
             raise CephConnectionError(f"PVE API call failed: {path} -> {exc}") from exc
 
     def get_health(self) -> dict[str, Any]:
-        try:
-            data = self._get("/cluster/ceph/status")
-            health = data.get("health", {})
-            return {
-                "status": health.get("status", "HEALTH_OK"),
-                "health": health,
-            }
-        except Exception:
-            return {"status": "HEALTH_OK", "health": {"status": "HEALTH_OK", "checks": []}}
+        data = self._get("/cluster/ceph/status") or {}
+        if not isinstance(data, dict):
+            raise CephConnectionError("Ceph status payload was not an object")
+        health = data.get("health", {}) if isinstance(data.get("health"), dict) else {}
+        return {
+            "status": health.get("status", "unknown"),
+            "health": health,
+        }
 
     def get_status(self) -> dict[str, Any]:
-        try:
-            data = self._get("/cluster/ceph/status")
-            osdmap = data.get("osdmap", {})
-            monmap = data.get("monmap", {})
-            pgmap = data.get("pgmap", {})
-            return {
-                "fsid": data.get("fsid", "unknown"),
-                "health": {"status": data.get("health", {}).get("status", "HEALTH_OK")},
-                "mon": {"count": len(monmap.get("mons", []))},
-                "osd": {
-                    "count": osdmap.get("osd_count", 0),
-                    "up": osdmap.get("num_up_osds", 0),
-                    "in": osdmap.get("num_in_osds", 0),
-                },
-                "pgmap": {"pgs_by_state": pgmap.get("pgs_by_state", [])},
-            }
-        except Exception:
-            return {
-                "fsid": "unknown",
-                "health": {"status": "HEALTH_OK"},
-                "mon": {"count": 3},
-                "osd": {"count": 5, "up": 5, "in": 5},
-                "pgmap": {"pgs_by_state": []},
-            }
+        data = self._get("/cluster/ceph/status") or {}
+        if not isinstance(data, dict):
+            raise CephConnectionError("Ceph status payload was not an object")
+        osdmap = data.get("osdmap", {}) if isinstance(data.get("osdmap"), dict) else {}
+        monmap = data.get("monmap", {}) if isinstance(data.get("monmap"), dict) else {}
+        pgmap = data.get("pgmap", {}) if isinstance(data.get("pgmap"), dict) else {}
+        health = data.get("health", {}) if isinstance(data.get("health"), dict) else {}
+        return {
+            "fsid": data.get("fsid"),
+            "health": {"status": health.get("status", "unknown")},
+            "mon": {"count": len(monmap.get("mons", []) or [])},
+            "osd": {
+                "count": osdmap.get("osd_count"),
+                "up": osdmap.get("num_up_osds"),
+                "in": osdmap.get("num_in_osds"),
+            },
+            "osdmap": osdmap,
+            "monmap": monmap,
+            "pgmap": {"pgs_by_state": pgmap.get("pgs_by_state", [])},
+            "pgmap_raw": pgmap,
+        }
 
     def get_osds(self) -> list[dict[str, Any]]:
-        try:
-            # Try cluster-level OSD list first
-            try:
-                data = self._get("/cluster/ceph/osd")
-                if isinstance(data, list) and data:
-                    result = []
-                    for osd in data:
-                        result.append({
-                            "id": osd.get("id"),
-                            "name": f"osd.{osd.get('id')}",
-                            "status": "up" if osd.get("in") else "down",
-                            "in": bool(osd.get("in")),
-                            "usage": osd.get("utilization", 0.0),
-                        })
-                    return result
-            except Exception:
-                pass
+        payloads: list[Any] = []
 
-            # Fallback: query per-node (common on Proxmox 8)
-            nodes = ["pvenodeone", "pvenodetwo", "pvenodethree"]
-            all_osds = []
-            for node in nodes:
-                try:
-                    node_data = self._get(f"/nodes/{node}/ceph/osd")
-                    if isinstance(node_data, list):
-                        for osd in node_data:
-                            all_osds.append({
-                                "id": osd.get("id"),
-                                "name": f"osd.{osd.get('id')}",
-                                "status": "up" if osd.get("in") else "down",
-                                "in": bool(osd.get("in")),
-                                "usage": osd.get("utilization", 0.0),
-                            })
-                except Exception:
-                    continue
-            if all_osds:
-                return all_osds
-        except Exception:
+        # Cluster-level (shape varies by PVE version)
+        try:
+            data = self._get("/cluster/ceph/osd")
+            if data is not None:
+                payloads.append(data)
+        except CephConnectionError:
             pass
 
-        # Final fallback (should rarely trigger now)
-        return [
-            {"id": 0, "name": "osd.0", "status": "up", "in": True, "usage": 45.2},
-            {"id": 1, "name": "osd.1", "status": "up", "in": True, "usage": 47.1},
-            {"id": 2, "name": "osd.2", "status": "up", "in": True, "usage": 44.8},
-            {"id": 3, "name": "osd.3", "status": "up", "in": True, "usage": 40.0},
-            {"id": 4, "name": "osd.4", "status": "up", "in": True, "usage": 42.0},
-        ]
+        # Per-node trees (common on Proxmox 8)
+        node_names: list[str] = []
+        try:
+            nodes = self._get("/nodes") or []
+            if isinstance(nodes, list):
+                node_names = [n.get("node") for n in nodes if isinstance(n, dict) and n.get("node")]
+        except CephConnectionError:
+            node_names = []
+
+        for node in node_names:
+            try:
+                node_data = self._get(f"/nodes/{node}/ceph/osd")
+                if node_data is not None:
+                    payloads.append({"node": node, "data": node_data})
+            except CephConnectionError:
+                continue
+
+        osds = extract_osds_from_tree(payloads)
+        # Live empty is valid — caller must not invent rows.
+        return osds
 
     def get_fs(self) -> dict[str, Any]:
-        try:
-            data = self._get("/cluster/ceph/fs")
-            if isinstance(data, list) and data:
-                fs = data[0]
-                return {
-                    "name": fs.get("name", "cephfs"),
-                    "status": fs.get("status", "active"),
-                    "subvolumes": [],
-                }
-            return {"name": "cephfs", "status": "active", "subvolumes": []}
-        except Exception:
-            return {"name": "cephfs", "status": "active", "subvolumes": []}
+        data = self._get("/cluster/ceph/fs")
+        if isinstance(data, list) and data:
+            fs = data[0] if isinstance(data[0], dict) else {}
+            return {
+                "name": fs.get("name", "cephfs"),
+                "status": fs.get("status", "unknown"),
+                "subvolumes": [],
+            }
+        if isinstance(data, dict) and data:
+            return {
+                "name": data.get("name", "cephfs"),
+                "status": data.get("status", "unknown"),
+                "subvolumes": [],
+            }
+        return {"name": None, "status": "unavailable", "subvolumes": []}
 
 
 class CephClient:
     def __init__(self, backend: str = "pve_api", pve_client=None):
-        # We now default to the real PVE API adapter
         self._impl: CephBackend = PveApiCephAdapter()
 
     def get_health(self) -> dict[str, Any]:

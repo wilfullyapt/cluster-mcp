@@ -98,5 +98,9 @@ This enables Hermes to keep the MCP current autonomously.
 - [x] /lxc/reverse-proxy-template already present and documented; leveraged in visibility flows
 - [x] Updated with 2026-09-04 probe findings + new visibility implementation notes
 - [x] Delivered: /report/visibility returns structured + markdown + raw_graph_data
+- [x] Live-only rebuild: visibility builder + `/report/visibility.png` single image card
+- [x] Removed fabricated Ceph OSD/status fallbacks from CephClient (empty/error instead of fake rows)
+- [x] `scripts/render_visibility_report.py` for ops-side PNG from live MCP HTTP probes
+- [ ] Deploy updated ClusterMCP LXC so production serves `/report/visibility.png` (Pillow dep + restart)
 
 **Philosophy reminder**: All new work stays read-audit first; write actions remain gated.
