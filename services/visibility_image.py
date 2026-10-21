@@ -28,9 +28,11 @@ ACCENT = (56, 189, 248)
 LINE = (48, 58, 78)
 ICON_RING = (12, 14, 22)
 
-# Discord chat ~390px. Target ≥14px on-screen body at fit-width
-# ⇒ body_font >= 14 * WIDTH / 390. WIDTH=1600 ⇒ ~57px body.
-DEFAULT_WIDTH = 1600
+# Design base is 1600 logical units. Default export is 2× (3200px) for
+# Discord zoom sharpness. Type scales with width so fit-width on ~390px
+# phone stays ~14 CSS-px body: body_px ≈ 14 * width / 390.
+BASE_WIDTH = 1600
+DEFAULT_WIDTH = 3200  # 2× wide, 2× glyph pixels vs prior card
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -163,40 +165,47 @@ def _cell_fill(cell: str) -> tuple[int, int, int]:
 
 
 class _Canvas:
+    """Layout in BASE_WIDTH design units, rasterized at `width` (default 2×)."""
+
     def __init__(self, width: int = DEFAULT_WIDTH):
-        self.width = width
-        self.pad = 64
-        self.content_w = width - self.pad * 2
+        self.width = int(width)
+        self.scale = self.width / float(BASE_WIDTH)
+        self.pad = self.u(64)
+        self.content_w = self.width - self.pad * 2
         self.y = self.pad
         self.elements: list[tuple] = []
-        # Sized for ≥14 CSS-px body after Discord fit-width on ~390px chat:
-        # body_px >= 14 * width / 390  (at 1600 ⇒ ~57)
-        self.title_f = _font(78, bold=True)
-        self.head_f = _font(56, bold=True)
-        self.sub_f = _font(40, bold=True)
-        self.body_f = _font(58)
-        self.mono_f = _font(52)
-        self.small_f = _font(42)
-        self.chip_f = _font(46)
-        self.icon = 40
-        self.row_h = 120
-        self.header_h = 96
-        self.section_h = 120
-        self.scratch = Image.new("RGB", (width, 160), BG)
+        # Base design (1600): body 58 → at 3200 becomes 116px glyphs
+        self.title_f = _font(self.u(78), bold=True)
+        self.head_f = _font(self.u(56), bold=True)
+        self.sub_f = _font(self.u(40), bold=True)
+        self.body_f = _font(self.u(58))
+        self.mono_f = _font(self.u(52))
+        self.small_f = _font(self.u(42))
+        self.chip_f = _font(self.u(46))
+        self.icon = self.u(40)
+        self.row_h = self.u(120)
+        self.header_h = self.u(96)
+        self.section_h = self.u(120)
+        self.scratch = Image.new("RGB", (self.width, self.u(160)), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
+    def u(self, n: float | int) -> int:
+        """Scale a base-1600 design unit to export pixels."""
+        return max(1, int(round(float(n) * self.scale)))
+
     def gap(self, n: int = 36) -> None:
-        self.elements.append(("gap", n))
-        self.y += n
+        g = self.u(n)
+        self.elements.append(("gap", g))
+        self.y += g
 
     def title_block(self, title: str, meta: str, overall_label: str, overall_color: tuple[int, int, int]) -> None:
         self.elements.append(("title", self.y, title, meta, overall_label, overall_color))
-        self.y += 78 + 20 + 48 + 28 + 72 + 44
+        self.y += self.u(78 + 20 + 48 + 28 + 72 + 44)
 
     def section_header(self, name: str, status_label: str, status_color: tuple[int, int, int], subtitle: str = "") -> None:
-        h = self.section_h + (48 if subtitle else 0)
+        h = self.section_h + (self.u(48) if subtitle else 0)
         self.elements.append(("section", self.y, name, status_label, status_color, subtitle, h))
-        self.y += h + 24
+        self.y += h + self.u(24)
 
     def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
         x = 0
@@ -206,16 +215,16 @@ class _Canvas:
         for label, value, vcolor in items:
             text = f"{label}  {value}"
             tw, th = _text_size(self.d0, text, self.chip_f)
-            chip_w = tw + (56 if vcolor else 40)
-            chip_h = th + 32
+            chip_w = tw + (self.u(56) if vcolor else self.u(40))
+            chip_h = th + self.u(32)
             row_h = max(row_h, chip_h)
             if x + chip_w > max_w and x > 0:
                 rows += 1
                 x = 0
-            x += chip_w + 16
-        total_h = rows * (row_h + 16) + 8
+            x += chip_w + self.u(16)
+        total_h = rows * (row_h + self.u(16)) + self.u(8)
         self.elements.append(("chips", self.y, items, total_h))
-        self.y += total_h + 20
+        self.y += total_h + self.u(20)
 
     def table(
         self,
@@ -224,46 +233,50 @@ class _Canvas:
         rows: list[tuple[str, tuple[int, int, int], list[str]]],
         row_h: int | None = None,
     ) -> None:
-        rh = row_h or self.row_h
+        # row_h is BASE_WIDTH design units when provided
+        rh = self.row_h if row_h is None else self.u(row_h)
         hh = self.header_h
-        h = hh + max(1, len(rows)) * rh + 10
+        h = hh + max(1, len(rows)) * rh + self.u(10)
         self.elements.append(("table", self.y, headers, col_weights, rows, rh, hh, h))
-        self.y += h + 28
+        self.y += h + self.u(28)
 
     def multiline_rows(
         self,
         rows: list[tuple[str, tuple[int, int, int], str, str]],
         row_h: int = 150,
     ) -> None:
-        h = max(1, len(rows)) * row_h + 8
-        self.elements.append(("mrows", self.y, rows, row_h, h))
-        self.y += h + 36
+        rh = self.u(row_h)
+        h = max(1, len(rows)) * rh + self.u(8)
+        self.elements.append(("mrows", self.y, rows, rh, h))
+        self.y += h + self.u(36)
 
     def bullet_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
-        total = 16
+        total = self.u(16)
         wrapped_all: list[tuple[list[str], tuple[int, int, int]]] = []
-        max_w = self.content_w - 90
+        max_w = self.content_w - self.u(90)
+        line_h = self.u(60)
         for text, color in lines:
             parts = _wrap(self.d0, text, self.body_f, max_w)
             wrapped_all.append((parts, color))
-            total += len(parts) * 60 + 20
-        self.elements.append(("bullets", self.y, wrapped_all, total))
-        self.y += total + 20
+            total += len(parts) * line_h + self.u(20)
+        self.elements.append(("bullets", self.y, wrapped_all, total, line_h))
+        self.y += total + self.u(20)
 
     def footer(self, text: str) -> None:
         self.elements.append(("footer", text))
-        self.y += 96
+        self.y += self.u(96)
 
     def render(self) -> Image.Image:
-        height = max(self.y + self.pad, 1200)
+        u = self.u
+        height = max(self.y + self.pad, u(1200))
         img = Image.new("RGB", (self.width, height), BG)
         draw = ImageDraw.Draw(img)
         draw.rounded_rectangle(
-            (24, 24, self.width - 24, height - 24),
-            radius=28,
+            (u(24), u(24), self.width - u(24), height - u(24)),
+            radius=u(28),
             fill=CARD,
             outline=CARD_BORDER,
-            width=3,
+            width=max(2, u(3)),
         )
 
         for el in self.elements:
@@ -275,28 +288,28 @@ class _Canvas:
                 _draw_status_icon(
                     draw,
                     self.pad,
-                    y + 14,
+                    y + u(14),
                     "ok" if olabel == "OK" else ("bad" if olabel == "DOWN" else "warn"),
                     ocolor,
-                    size=52,
+                    size=u(52),
                 )
-                draw.text((self.pad + 72, y), title, font=self.title_f, fill=TEXT)
-                draw.text((self.pad + 72, y + 96), meta, font=self.small_f, fill=MUTED)
+                draw.text((self.pad + u(72), y), title, font=self.title_f, fill=TEXT)
+                draw.text((self.pad + u(72), y + u(96)), meta, font=self.small_f, fill=MUTED)
                 pill = f"OVERALL  {olabel}"
                 pw, ph = _text_size(draw, pill, self.sub_f)
-                px = self.pad + 72
-                py = y + 156
-                draw.rounded_rectangle((px, py, px + pw + 48, py + ph + 28), radius=18, fill=ocolor)
-                draw.text((px + 24, py + 12), pill, font=self.sub_f, fill=ICON_RING)
+                px = self.pad + u(72)
+                py = y + u(156)
+                draw.rounded_rectangle((px, py, px + pw + u(48), py + ph + u(28)), radius=u(18), fill=ocolor)
+                draw.text((px + u(24), py + u(12)), pill, font=self.sub_f, fill=ICON_RING)
                 continue
             if kind == "section":
                 _, y, name, slabel, scolor, subtitle, h = el
                 draw.rounded_rectangle(
-                    (self.pad, y, self.width - self.pad, y + h - 8),
-                    radius=18,
+                    (self.pad, y, self.width - self.pad, y + h - u(8)),
+                    radius=u(18),
                     fill=HEADER_BG,
                     outline=LINE,
-                    width=2,
+                    width=max(2, u(2)),
                 )
                 if slabel.upper() in ("OK", "HEALTHY", "ONLINE"):
                     kind_icon = "ok"
@@ -304,15 +317,15 @@ class _Canvas:
                     kind_icon = "bad"
                 else:
                     kind_icon = "warn"
-                _draw_status_icon(draw, self.pad + 24, y + 28, kind_icon, scolor, size=44)
-                draw.text((self.pad + 84, y + 24), name, font=self.head_f, fill=ACCENT)
+                _draw_status_icon(draw, self.pad + u(24), y + u(28), kind_icon, scolor, size=u(44))
+                draw.text((self.pad + u(84), y + u(24)), name, font=self.head_f, fill=ACCENT)
                 tag = slabel.upper()
                 tw, th = _text_size(draw, tag, self.sub_f)
-                tx = self.width - self.pad - tw - 48
-                draw.rounded_rectangle((tx, y + 24, tx + tw + 28, y + 24 + th + 20), radius=14, fill=scolor)
-                draw.text((tx + 14, y + 32), tag, font=self.sub_f, fill=ICON_RING)
+                tx = self.width - self.pad - tw - u(48)
+                draw.rounded_rectangle((tx, y + u(24), tx + tw + u(28), y + u(24) + th + u(20)), radius=u(14), fill=scolor)
+                draw.text((tx + u(14), y + u(32)), tag, font=self.sub_f, fill=ICON_RING)
                 if subtitle:
-                    draw.text((self.pad + 84, y + 92), subtitle, font=self.small_f, fill=MUTED)
+                    draw.text((self.pad + u(84), y + u(92)), subtitle, font=self.small_f, fill=MUTED)
                 continue
             if kind == "chips":
                 _, y, items, _total_h = el
@@ -323,37 +336,37 @@ class _Canvas:
                 for label, value, vcolor in items:
                     text = f"{label}  {value}"
                     tw, th = _text_size(draw, text, self.chip_f)
-                    chip_w = tw + (56 if vcolor else 40)
-                    chip_h = th + 32
+                    chip_w = tw + (u(56) if vcolor else u(40))
+                    chip_h = th + u(32)
                     if x + chip_w > max_x and x > self.pad:
                         x = self.pad
-                        row_y += max(row_h, chip_h) + 16
+                        row_y += max(row_h, chip_h) + u(16)
                         row_h = 0
                     row_h = max(row_h, chip_h)
                     draw.rounded_rectangle(
                         (x, row_y, x + chip_w, row_y + chip_h),
-                        radius=16,
+                        radius=u(16),
                         fill=(32, 38, 56),
                         outline=LINE,
-                        width=2,
+                        width=max(2, u(2)),
                     )
                     if vcolor:
                         _draw_status_icon(
                             draw,
-                            x + 16,
+                            x + u(16),
                             row_y + (chip_h - self.icon) // 2,
                             _status_color(value)[0],
                             vcolor,
                             size=self.icon,
                         )
-                        draw.text((x + 64, row_y + 14), text, font=self.chip_f, fill=TEXT)
+                        draw.text((x + u(64), row_y + u(14)), text, font=self.chip_f, fill=TEXT)
                     else:
-                        draw.text((x + 18, row_y + 14), text, font=self.chip_f, fill=TEXT)
-                    x += chip_w + 16
+                        draw.text((x + u(18), row_y + u(14)), text, font=self.chip_f, fill=TEXT)
+                    x += chip_w + u(16)
                 continue
             if kind == "table":
                 _, y, headers, weights, rows, rh, hh, _h = el
-                icon_col = 80
+                icon_col = u(80)
                 inner_w = self.content_w - icon_col
                 weight_sum = sum(weights) or 1.0
                 col_ws = [int(inner_w * (w / weight_sum)) for w in weights]
@@ -361,13 +374,13 @@ class _Canvas:
                 draw.rectangle((self.pad, y, self.width - self.pad, y + hh), fill=HEADER_BG)
                 cx = self.pad + icon_col
                 for i, hname in enumerate(headers):
-                    draw.text((cx + 12, y + (hh - 44) // 2), hname, font=self.sub_f, fill=MUTED)
+                    draw.text((cx + u(12), y + (hh - u(44)) // 2), hname, font=self.sub_f, fill=MUTED)
                     cx += col_ws[i]
                 ry = y + hh
                 if not rows:
                     draw.rectangle((self.pad, ry, self.width - self.pad, ry + rh), fill=ROW_A)
                     draw.text(
-                        (self.pad + icon_col + 12, ry + (rh - 50) // 2),
+                        (self.pad + icon_col + u(12), ry + (rh - u(50)) // 2),
                         "(none from live probes)",
                         font=self.body_f,
                         fill=MUTED,
@@ -378,7 +391,7 @@ class _Canvas:
                     draw.rectangle((self.pad, ry, self.width - self.pad, ry + rh), fill=bg)
                     _draw_status_icon(
                         draw,
-                        self.pad + 20,
+                        self.pad + u(20),
                         ry + (rh - self.icon) // 2,
                         skind,
                         scolor,
@@ -386,18 +399,18 @@ class _Canvas:
                     )
                     cx = self.pad + icon_col
                     for i, cell in enumerate(cells):
-                        max_w = col_ws[i] - 24
+                        max_w = col_ws[i] - u(24)
                         shown = _fit_cell(draw, cell, self.mono_f, max_w)
                         draw.text(
-                            (cx + 12, ry + (rh - 48) // 2),
+                            (cx + u(12), ry + (rh - u(48)) // 2),
                             shown,
                             font=self.mono_f,
                             fill=_cell_fill(str(cell)),
                         )
                         cx += col_ws[i]
-                    draw.line((self.pad, ry + rh - 1, self.width - self.pad, ry + rh - 1), fill=LINE, width=2)
+                    draw.line((self.pad, ry + rh - 1, self.width - self.pad, ry + rh - 1), fill=LINE, width=max(2, u(2)))
                     ry += rh
-                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=2)
+                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
                 continue
             if kind == "mrows":
                 _, y, rows, rh, _h = el
@@ -407,46 +420,46 @@ class _Canvas:
                     draw.rectangle((self.pad, ry, self.width - self.pad, ry + rh), fill=bg)
                     _draw_status_icon(
                         draw,
-                        self.pad + 20,
+                        self.pad + u(20),
                         ry + (rh - self.icon) // 2,
                         skind,
                         scolor,
                         size=self.icon,
                     )
-                    max_w = self.content_w - 110
+                    max_w = self.content_w - u(110)
                     p = _fit_cell(draw, primary, self.mono_f, max_w)
                     s = _fit_cell(draw, secondary, self.small_f, max_w)
-                    draw.text((self.pad + 80, ry + 22), p, font=self.mono_f, fill=TEXT)
-                    draw.text((self.pad + 80, ry + 22 + 58), s, font=self.small_f, fill=MUTED)
-                    draw.line((self.pad, ry + rh - 1, self.width - self.pad, ry + rh - 1), fill=LINE, width=2)
+                    draw.text((self.pad + u(80), ry + u(22)), p, font=self.mono_f, fill=TEXT)
+                    draw.text((self.pad + u(80), ry + u(22) + u(58)), s, font=self.small_f, fill=MUTED)
+                    draw.line((self.pad, ry + rh - 1, self.width - self.pad, ry + rh - 1), fill=LINE, width=max(2, u(2)))
                     ry += rh
-                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=2)
+                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
                 continue
             if kind == "bullets":
-                _, y, wrapped_all, _total = el
+                _, y, wrapped_all, _total, line_h = el
                 yy = y
                 for parts, color in wrapped_all:
                     for i, part in enumerate(parts):
                         if i == 0:
                             _draw_status_icon(
                                 draw,
-                                self.pad + 8,
-                                yy + 6,
+                                self.pad + u(8),
+                                yy + u(6),
                                 "warn" if color == WARN else ("bad" if color == BAD else "ok"),
                                 color,
-                                size=34,
+                                size=u(34),
                             )
                             body = part.lstrip("• ").lstrip()
-                            draw.text((self.pad + 56, yy), f"• {body}", font=self.body_f, fill=color)
+                            draw.text((self.pad + u(56), yy), f"• {body}", font=self.body_f, fill=color)
                         else:
-                            draw.text((self.pad + 56, yy), f"  {part}", font=self.body_f, fill=color)
-                        yy += 60
-                    yy += 20
+                            draw.text((self.pad + u(56), yy), f"  {part}", font=self.body_f, fill=color)
+                        yy += line_h
+                    yy += u(20)
                 continue
             if kind == "footer":
                 text = el[1]
-                draw.line((self.pad, height - 84, self.width - self.pad, height - 84), fill=LINE, width=2)
-                draw.text((self.pad, height - 64), text, font=self.small_f, fill=MUTED)
+                draw.line((self.pad, height - u(84), self.width - self.pad, height - u(84)), fill=LINE, width=max(2, u(2)))
+                draw.text((self.pad, height - u(64)), text, font=self.small_f, fill=MUTED)
         return img
 
 
@@ -463,7 +476,7 @@ def _section_status_from_rows(statuses: list[Any]) -> tuple[str, tuple[int, int,
 
 def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) -> bytes:
     """Return Discord-mobile-readable PNG (large type, airy tables)."""
-    width = max(1400, int(width))
+    width = max(BASE_WIDTH, int(width))
     c = _Canvas(width=width)
 
     overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
@@ -481,7 +494,7 @@ def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) 
 
     c.title_block(
         title="ClusterMCP  ·  Visibility",
-        meta=f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  mobile large-type",
+        meta=f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  {width}px 2× export",
         overall_label=label,
         overall_color=color,
     )
@@ -622,7 +635,7 @@ def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) 
         c.section_header("Attention", "OK", OK, subtitle="No warnings")
         c.bullet_block([("No warnings from live probes.", OK)])
 
-    c.footer("Stronghold · live probes only · large-type Discord mobile card")
+    c.footer(f"Stronghold · live probes only · {width}× export · large-type Discord card")
 
     img = c.render()
     buf = io.BytesIO()
