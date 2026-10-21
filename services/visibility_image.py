@@ -612,11 +612,20 @@ def _attention_next_steps(warnings: list[str]) -> list[str]:
     for w in warnings:
         wl = str(w).lower()
         if "cephfs-immich" in wl or ("storage status unknown" in wl and "immich" in wl):
-            add("Next: on pvenodetwo + pvenodethree, fix or remove storage `cephfs-immich` (PVE → Datacenter → Storage) until status is available")
+            add(
+                "Next: on pvenodetwo + pvenodethree, fix or remove storage "
+                "`cephfs-immich` (PVE → Datacenter → Storage) until status is available"
+            )
         elif "stripped untrusted" in wl or ("osd" in wl and "fixture" in wl):
-            add("Next: deploy ClusterMCP build with live OSD tree (no fallback fixture) so /ceph/osds returns real detail")
+            add(
+                "Next: deploy ClusterMCP build with live OSD tree "
+                "(no fallback fixture) so /ceph/osds returns real detail"
+            )
         elif "per-osd utilization" in wl or "osd tree" in wl or "osd inventory" in wl:
-            add("Next: verify Ceph OSD tree API from MCP LXC (`/nodes/<node>/ceph/osd`) and redeploy fixed CephClient")
+            add(
+                "Next: verify Ceph OSD tree API from MCP LXC "
+                "(`/nodes/<node>/ceph/osd`) and redeploy fixed CephClient"
+            )
         elif "offline nodes" in wl:
             add(f"Next: bring offline node(s) online — {w.split(':',1)[-1].strip()}")
         elif "ceph health" in wl:
