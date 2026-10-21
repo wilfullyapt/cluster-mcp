@@ -1,6 +1,8 @@
 """Render a single Stronghold visibility report image from live report data.
 
-Mobile-first high-res card: table layouts, per-row status icons, airy spacing.
+Discord-mobile first: large type, airy layout, per-row status icons.
+Body type is sized so fit-to-width on a ~390px Discord column stays readable;
+pinch-zoom still has sharp native pixels (no post-scale blur).
 """
 
 from __future__ import annotations
@@ -17,14 +19,18 @@ CARD_BORDER = (48, 56, 78)
 HEADER_BG = (30, 36, 54)
 ROW_A = (26, 30, 44)
 ROW_B = (22, 26, 38)
-TEXT = (232, 238, 248)
-MUTED = (148, 163, 184)
+TEXT = (236, 240, 250)
+MUTED = (160, 174, 196)
 OK = (52, 211, 153)
 WARN = (251, 191, 36)
 BAD = (251, 113, 133)
 ACCENT = (56, 189, 248)
-LINE = (42, 50, 68)
-ICON_RING = (15, 18, 28)
+LINE = (48, 58, 78)
+ICON_RING = (12, 14, 22)
+
+# Discord chat ~390px. Target ≥14px on-screen body at fit-width
+# ⇒ body_font >= 14 * WIDTH / 390. WIDTH=1600 ⇒ ~57px body.
+DEFAULT_WIDTH = 1600
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -52,8 +58,6 @@ def _traffic(overall: str) -> tuple[str, tuple[int, int, int]]:
         return "WARN", WARN
     if o in ("down", "critical", "error", "offline", "stopped", "unavailable"):
         return "DOWN", BAD
-    if "health_ok" in o or o == "health_ok":
-        return "OK", OK
     return (o.upper() or "UNKNOWN"), MUTED
 
 
@@ -72,12 +76,12 @@ def _status_color(value: Any) -> tuple[str, tuple[int, int, int]]:
     return "muted", MUTED
 
 
-def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
+def _text_size(draw: ImageDraw.ImageDraw, text: str, font: Any) -> tuple[int, int]:
     box = draw.textbbox((0, 0), text, font=font)
     return int(box[2] - box[0]), int(box[3] - box[1])
 
 
-def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int) -> list[str]:
+def _wrap(draw: ImageDraw.ImageDraw, text: str, font: Any, max_width: int) -> list[str]:
     words = str(text).split()
     if not words:
         return [""]
@@ -101,38 +105,37 @@ def _draw_status_icon(
     y: int,
     kind: str,
     color: tuple[int, int, int],
-    size: int = 18,
+    size: int = 28,
 ) -> None:
-    """Draw a crisp status glyph at (x,y) top-left of the icon box."""
     r = size // 2
     cx, cy = x + r, y + r
-    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color, outline=ICON_RING, width=1)
-    # inner mark
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color, outline=ICON_RING, width=max(2, size // 12))
+    w = max(3, size // 6)
     if kind == "ok":
-        # check
-        draw.line([(cx - r // 2, cy), (cx - r // 6, cy + r // 2), (cx + r // 2, cy - r // 2)], fill=ICON_RING, width=max(2, size // 7))
+        draw.line(
+            [(cx - r // 2, cy), (cx - r // 7, cy + r // 2), (cx + r // 2 + 1, cy - r // 2)],
+            fill=ICON_RING,
+            width=w,
+        )
     elif kind == "bad":
-        # x
-        o = r // 2
-        draw.line([(cx - o, cy - o), (cx + o, cy + o)], fill=ICON_RING, width=max(2, size // 7))
-        draw.line([(cx + o, cy - o), (cx - o, cy + o)], fill=ICON_RING, width=max(2, size // 7))
+        o = max(4, r // 2)
+        draw.line([(cx - o, cy - o), (cx + o, cy + o)], fill=ICON_RING, width=w)
+        draw.line([(cx + o, cy - o), (cx - o, cy + o)], fill=ICON_RING, width=w)
     elif kind == "warn":
-        # bang
-        draw.line([(cx, cy - r // 2), (cx, cy + r // 6)], fill=ICON_RING, width=max(2, size // 6))
-        draw.ellipse((cx - 2, cy + r // 3, cx + 2, cy + r // 3 + 4), fill=ICON_RING)
+        draw.line([(cx, cy - r // 2), (cx, cy + r // 5)], fill=ICON_RING, width=w)
+        br = max(3, size // 10)
+        draw.ellipse((cx - br, cy + r // 3, cx + br, cy + r // 3 + br * 2), fill=ICON_RING)
     else:
-        # dash
-        draw.line([(cx - r // 2, cy), (cx + r // 2, cy)], fill=ICON_RING, width=max(2, size // 6))
+        draw.line([(cx - r // 2, cy), (cx + r // 2, cy)], fill=ICON_RING, width=w)
 
 
-def _fit_cell(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_w: int) -> str:
+def _fit_cell(draw: ImageDraw.ImageDraw, text: str, font: Any, max_w: int) -> str:
     text = str(text if text is not None else "—")
-    if max_w <= 8:
+    if max_w <= 12:
         return text
     tw, _ = _text_size(draw, text, font)
     if tw <= max_w:
         return text
-    # ellipsize
     ell = "…"
     lo, hi = 0, len(text)
     best = ell
@@ -148,155 +151,166 @@ def _fit_cell(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, m
     return best
 
 
+def _cell_fill(cell: str) -> tuple[int, int, int]:
+    low = str(cell).lower()
+    if low in ("online", "running", "available", "up", "health_ok", "ok", "yes", "clean"):
+        return OK
+    if low in ("unknown", "degraded", "warn", "dirty", "no"):
+        return WARN
+    if low in ("offline", "down", "stopped", "error", "unavailable"):
+        return BAD
+    return TEXT
+
+
 class _Canvas:
-    def __init__(self, width: int, scale: int = 2):
-        self.scale = max(1, scale)
+    def __init__(self, width: int = DEFAULT_WIDTH):
         self.width = width
-        # build at logical size then we already use high font sizes; keep 1:1 high res width
-        self.pad = 44
+        self.pad = 56
         self.content_w = width - self.pad * 2
         self.y = self.pad
         self.elements: list[tuple] = []
-        self.title_f = _font(34, bold=True)
-        self.head_f = _font(22, bold=True)
-        self.sub_f = _font(16, bold=True)
-        self.body_f = _font(17)
-        self.mono_f = _font(16)
-        self.small_f = _font(14)
-        self.scratch = Image.new("RGB", (width, 100), BG)
+        self.title_f = _font(64, bold=True)
+        self.head_f = _font(44, bold=True)
+        self.sub_f = _font(32, bold=True)
+        self.body_f = _font(34)
+        self.mono_f = _font(32)
+        self.small_f = _font(28)
+        self.chip_f = _font(30)
+        self.icon = 30
+        self.row_h = 92
+        self.header_h = 72
+        self.section_h = 88
+        self.scratch = Image.new("RGB", (width, 120), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
-    def gap(self, n: int = 16) -> None:
+    def gap(self, n: int = 28) -> None:
         self.elements.append(("gap", n))
         self.y += n
 
-    def rule(self) -> None:
-        self.elements.append(("rule", self.y))
-        self.y += 14
-
     def title_block(self, title: str, meta: str, overall_label: str, overall_color: tuple[int, int, int]) -> None:
         self.elements.append(("title", self.y, title, meta, overall_label, overall_color))
-        # estimate height
-        self.y += 34 + 10 + 18 + 18 + 28 + 22
+        self.y += 64 + 16 + 32 + 24 + 56 + 36
 
     def section_header(self, name: str, status_label: str, status_color: tuple[int, int, int], subtitle: str = "") -> None:
-        h = 46 + (22 if subtitle else 0)
+        h = self.section_h + (36 if subtitle else 0)
         self.elements.append(("section", self.y, name, status_label, status_color, subtitle, h))
-        self.y += h + 10
+        self.y += h + 18
 
     def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
-        """items: (label, value, optional status color for value)."""
-        # Measure real wrapped height so we don't leave a void under sparse chip rows.
         x = 0
         rows = 1
         row_h = 0
         max_w = self.content_w
         for label, value, vcolor in items:
             text = f"{label}  {value}"
-            tw, th = _text_size(self.d0, text, self.body_f)
-            chip_w = tw + (36 if vcolor else 28)
-            chip_h = th + 18
+            tw, th = _text_size(self.d0, text, self.chip_f)
+            chip_w = tw + (48 if vcolor else 36)
+            chip_h = th + 28
             row_h = max(row_h, chip_h)
             if x + chip_w > max_w and x > 0:
                 rows += 1
                 x = 0
-            x += chip_w + 10
-        total_h = rows * (row_h + 10) + 4
+            x += chip_w + 14
+        total_h = rows * (row_h + 14) + 6
         self.elements.append(("chips", self.y, items, total_h))
-        self.y += total_h + 8
+        self.y += total_h + 16
 
     def table(
         self,
         headers: list[str],
         col_weights: list[float],
         rows: list[tuple[str, tuple[int, int, int], list[str]]],
-        row_h: int = 44,
+        row_h: int | None = None,
     ) -> None:
-        """
-        rows: list of (status_kind, status_color, cell_values)
-        First visual column is status icon (fixed), then headers.
-        """
-        header_h = 40
-        h = header_h + max(1, len(rows)) * row_h + 8
-        self.elements.append(("table", self.y, headers, col_weights, rows, row_h, header_h, h))
-        self.y += h + 18
+        rh = row_h or self.row_h
+        hh = self.header_h
+        h = hh + max(1, len(rows)) * rh + 10
+        self.elements.append(("table", self.y, headers, col_weights, rows, rh, hh, h))
+        self.y += h + 28
 
-    def bullet_block(self, title_color: tuple[int, int, int], lines: list[tuple[str, tuple[int, int, int]]]) -> None:
-        # each line may wrap
-        total = 8
+    def multiline_rows(
+        self,
+        rows: list[tuple[str, tuple[int, int, int], str, str]],
+        row_h: int = 120,
+    ) -> None:
+        h = max(1, len(rows)) * row_h + 8
+        self.elements.append(("mrows", self.y, rows, row_h, h))
+        self.y += h + 28
+
+    def bullet_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
+        total = 12
         wrapped_all: list[tuple[list[str], tuple[int, int, int]]] = []
-        max_w = self.content_w - 56
+        max_w = self.content_w - 72
         for text, color in lines:
             parts = _wrap(self.d0, text, self.body_f, max_w)
             wrapped_all.append((parts, color))
-            total += len(parts) * 26 + 8
+            total += len(parts) * 44 + 16
         self.elements.append(("bullets", self.y, wrapped_all, total))
-        self.y += total + 8
+        self.y += total + 16
 
     def footer(self, text: str) -> None:
         self.elements.append(("footer", text))
-        self.y += 48
+        self.y += 72
 
     def render(self) -> Image.Image:
-        height = max(self.y + self.pad, 900)
+        height = max(self.y + self.pad, 1200)
         img = Image.new("RGB", (self.width, height), BG)
         draw = ImageDraw.Draw(img)
         draw.rounded_rectangle(
-            (18, 18, self.width - 18, height - 18),
-            radius=22,
+            (24, 24, self.width - 24, height - 24),
+            radius=28,
             fill=CARD,
             outline=CARD_BORDER,
-            width=2,
+            width=3,
         )
 
         for el in self.elements:
             kind = el[0]
             if kind == "gap":
                 continue
-            if kind == "rule":
-                y = el[1]
-                draw.line((self.pad, y, self.width - self.pad, y), fill=LINE, width=1)
-                continue
             if kind == "title":
                 _, y, title, meta, olabel, ocolor = el
-                _draw_status_icon(draw, self.pad, y + 6, "ok" if olabel == "OK" else ("bad" if olabel == "DOWN" else "warn"), ocolor, size=28)
-                draw.text((self.pad + 40, y), title, font=self.title_f, fill=TEXT)
-                draw.text((self.pad + 40, y + 42), meta, font=self.small_f, fill=MUTED)
-                # overall pill
+                _draw_status_icon(
+                    draw,
+                    self.pad,
+                    y + 10,
+                    "ok" if olabel == "OK" else ("bad" if olabel == "DOWN" else "warn"),
+                    ocolor,
+                    size=44,
+                )
+                draw.text((self.pad + 60, y), title, font=self.title_f, fill=TEXT)
+                draw.text((self.pad + 60, y + 78), meta, font=self.small_f, fill=MUTED)
                 pill = f"OVERALL  {olabel}"
                 pw, ph = _text_size(draw, pill, self.sub_f)
-                px = self.pad + 40
-                py = y + 70
-                draw.rounded_rectangle((px, py, px + pw + 28, py + ph + 16), radius=12, fill=ocolor)
-                draw.text((px + 14, py + 8), pill, font=self.sub_f, fill=ICON_RING)
+                px = self.pad + 60
+                py = y + 120
+                draw.rounded_rectangle((px, py, px + pw + 40, py + ph + 24), radius=16, fill=ocolor)
+                draw.text((px + 20, py + 10), pill, font=self.sub_f, fill=ICON_RING)
                 continue
             if kind == "section":
                 _, y, name, slabel, scolor, subtitle, h = el
                 draw.rounded_rectangle(
-                    (self.pad, y, self.width - self.pad, y + h - 4),
-                    radius=12,
+                    (self.pad, y, self.width - self.pad, y + h - 6),
+                    radius=16,
                     fill=HEADER_BG,
                     outline=LINE,
-                    width=1,
+                    width=2,
                 )
-                kind_icon, _ = _status_color(slabel)
-                # map label to icon kind better
                 if slabel.upper() in ("OK", "HEALTHY", "ONLINE"):
                     kind_icon = "ok"
                 elif slabel.upper() in ("DOWN", "CRITICAL"):
                     kind_icon = "bad"
-                elif slabel.upper() in ("WARN", "DEGRADED", "ATTN"):
+                else:
                     kind_icon = "warn"
-                _draw_status_icon(draw, self.pad + 14, y + 12, kind_icon, scolor, size=22)
-                draw.text((self.pad + 46, y + 10), name, font=self.head_f, fill=ACCENT)
-                # right side status tag
+                _draw_status_icon(draw, self.pad + 20, y + 22, kind_icon, scolor, size=34)
+                draw.text((self.pad + 68, y + 18), name, font=self.head_f, fill=ACCENT)
                 tag = slabel.upper()
                 tw, th = _text_size(draw, tag, self.sub_f)
-                tx = self.width - self.pad - tw - 28
-                draw.rounded_rectangle((tx, y + 10, tx + tw + 16, y + 10 + th + 10), radius=8, fill=scolor)
-                draw.text((tx + 8, y + 14), tag, font=self.sub_f, fill=ICON_RING)
+                tx = self.width - self.pad - tw - 40
+                draw.rounded_rectangle((tx, y + 18, tx + tw + 24, y + 18 + th + 16), radius=12, fill=scolor)
+                draw.text((tx + 12, y + 24), tag, font=self.sub_f, fill=ICON_RING)
                 if subtitle:
-                    draw.text((self.pad + 46, y + 36), subtitle, font=self.small_f, fill=MUTED)
+                    draw.text((self.pad + 68, y + 70), subtitle, font=self.small_f, fill=MUTED)
                 continue
             if kind == "chips":
                 _, y, items, _total_h = el
@@ -306,99 +320,131 @@ class _Canvas:
                 row_h = 0
                 for label, value, vcolor in items:
                     text = f"{label}  {value}"
-                    tw, th = _text_size(draw, text, self.body_f)
-                    chip_w = tw + (36 if vcolor else 28)
-                    chip_h = th + 18
+                    tw, th = _text_size(draw, text, self.chip_f)
+                    chip_w = tw + (48 if vcolor else 36)
+                    chip_h = th + 28
                     if x + chip_w > max_x and x > self.pad:
                         x = self.pad
-                        row_y += max(row_h, chip_h) + 10
+                        row_y += max(row_h, chip_h) + 14
                         row_h = 0
                     row_h = max(row_h, chip_h)
-                    fill = (32, 38, 56)
-                    draw.rounded_rectangle((x, row_y, x + chip_w, row_y + chip_h), radius=10, fill=fill, outline=LINE, width=1)
+                    draw.rounded_rectangle(
+                        (x, row_y, x + chip_w, row_y + chip_h),
+                        radius=14,
+                        fill=(32, 38, 56),
+                        outline=LINE,
+                        width=2,
+                    )
                     if vcolor:
-                        _draw_status_icon(draw, x + 10, row_y + (chip_h - 16) // 2, _status_color(value)[0], vcolor, size=16)
-                        draw.text((x + 32, row_y + 8), text, font=self.body_f, fill=TEXT)
+                        _draw_status_icon(
+                            draw,
+                            x + 14,
+                            row_y + (chip_h - self.icon) // 2,
+                            _status_color(value)[0],
+                            vcolor,
+                            size=self.icon,
+                        )
+                        draw.text((x + 52, row_y + 12), text, font=self.chip_f, fill=TEXT)
                     else:
-                        draw.text((x + 12, row_y + 8), text, font=self.body_f, fill=TEXT)
-                    x += chip_w + 10
+                        draw.text((x + 16, row_y + 12), text, font=self.chip_f, fill=TEXT)
+                    x += chip_w + 14
                 continue
             if kind == "table":
-                _, y, headers, weights, rows, row_h, header_h, _h = el
-                icon_col = 44
-                table_w = self.content_w
-                inner_w = table_w - icon_col
+                _, y, headers, weights, rows, rh, hh, _h = el
+                icon_col = 64
+                inner_w = self.content_w - icon_col
                 weight_sum = sum(weights) or 1.0
                 col_ws = [int(inner_w * (w / weight_sum)) for w in weights]
-                # fix rounding
                 col_ws[-1] += inner_w - sum(col_ws)
-                # header
-                draw.rounded_rectangle(
-                    (self.pad, y, self.width - self.pad, y + header_h),
-                    radius=0,
-                    fill=HEADER_BG,
-                )
-                draw.rectangle((self.pad, y, self.width - self.pad, y + header_h), fill=HEADER_BG)
+                draw.rectangle((self.pad, y, self.width - self.pad, y + hh), fill=HEADER_BG)
                 cx = self.pad + icon_col
                 for i, hname in enumerate(headers):
-                    draw.text((cx + 8, y + 10), hname, font=self.sub_f, fill=MUTED)
+                    draw.text((cx + 10, y + (hh - 36) // 2), hname, font=self.sub_f, fill=MUTED)
                     cx += col_ws[i]
-                # rows
-                ry = y + header_h
+                ry = y + hh
                 if not rows:
-                    draw.rectangle((self.pad, ry, self.width - self.pad, ry + row_h), fill=ROW_A)
-                    draw.text((self.pad + icon_col + 8, ry + 12), "(none from live probes)", font=self.body_f, fill=MUTED)
-                    ry += row_h
+                    draw.rectangle((self.pad, ry, self.width - self.pad, ry + rh), fill=ROW_A)
+                    draw.text(
+                        (self.pad + icon_col + 10, ry + (rh - 36) // 2),
+                        "(none from live probes)",
+                        font=self.body_f,
+                        fill=MUTED,
+                    )
+                    ry += rh
                 for idx, (skind, scolor, cells) in enumerate(rows):
                     bg = ROW_A if idx % 2 == 0 else ROW_B
-                    draw.rectangle((self.pad, ry, self.width - self.pad, ry + row_h), fill=bg)
-                    _draw_status_icon(draw, self.pad + 12, ry + (row_h - 18) // 2, skind, scolor, size=18)
+                    draw.rectangle((self.pad, ry, self.width - self.pad, ry + rh), fill=bg)
+                    _draw_status_icon(
+                        draw,
+                        self.pad + 16,
+                        ry + (rh - self.icon) // 2,
+                        skind,
+                        scolor,
+                        size=self.icon,
+                    )
                     cx = self.pad + icon_col
                     for i, cell in enumerate(cells):
-                        max_w = col_ws[i] - 16
+                        max_w = col_ws[i] - 20
                         shown = _fit_cell(draw, cell, self.mono_f, max_w)
-                        # status-ish columns tint
-                        fill = TEXT
-                        low = str(cell).lower()
-                        if low in ("online", "running", "available", "up", "health_ok", "ok"):
-                            fill = OK
-                        elif low in ("unknown", "degraded", "warn"):
-                            fill = WARN
-                        elif low in ("offline", "down", "stopped", "error", "unavailable"):
-                            fill = BAD
-                        draw.text((cx + 8, ry + (row_h - 18) // 2), shown, font=self.mono_f, fill=fill)
+                        draw.text(
+                            (cx + 10, ry + (rh - 34) // 2),
+                            shown,
+                            font=self.mono_f,
+                            fill=_cell_fill(str(cell)),
+                        )
                         cx += col_ws[i]
-                    # row separator
-                    draw.line((self.pad, ry + row_h - 1, self.width - self.pad, ry + row_h - 1), fill=LINE, width=1)
-                    ry += row_h
-                # table border
-                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=1)
+                    draw.line((self.pad, ry + rh - 1, self.width - self.pad, ry + rh - 1), fill=LINE, width=2)
+                    ry += rh
+                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=2)
+                continue
+            if kind == "mrows":
+                _, y, rows, rh, _h = el
+                ry = y
+                for idx, (skind, scolor, primary, secondary) in enumerate(rows):
+                    bg = ROW_A if idx % 2 == 0 else ROW_B
+                    draw.rectangle((self.pad, ry, self.width - self.pad, ry + rh), fill=bg)
+                    _draw_status_icon(
+                        draw,
+                        self.pad + 16,
+                        ry + (rh - self.icon) // 2,
+                        skind,
+                        scolor,
+                        size=self.icon,
+                    )
+                    max_w = self.content_w - 90
+                    p = _fit_cell(draw, primary, self.mono_f, max_w)
+                    s = _fit_cell(draw, secondary, self.small_f, max_w)
+                    draw.text((self.pad + 64, ry + 18), p, font=self.mono_f, fill=TEXT)
+                    draw.text((self.pad + 64, ry + 18 + 44), s, font=self.small_f, fill=MUTED)
+                    draw.line((self.pad, ry + rh - 1, self.width - self.pad, ry + rh - 1), fill=LINE, width=2)
+                    ry += rh
+                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=2)
                 continue
             if kind == "bullets":
                 _, y, wrapped_all, _total = el
                 yy = y
                 for parts, color in wrapped_all:
                     for i, part in enumerate(parts):
-                        prefix = "• " if i == 0 else "  "
                         if i == 0:
                             _draw_status_icon(
                                 draw,
-                                self.pad + 4,
-                                yy + 2,
+                                self.pad + 6,
+                                yy + 4,
                                 "warn" if color == WARN else ("bad" if color == BAD else "ok"),
                                 color,
-                                size=16,
+                                size=26,
                             )
-                            draw.text((self.pad + 28, yy), f"{prefix}{part.lstrip('• ').lstrip()}", font=self.body_f, fill=color)
+                            body = part.lstrip("• ").lstrip()
+                            draw.text((self.pad + 44, yy), f"• {body}", font=self.body_f, fill=color)
                         else:
-                            draw.text((self.pad + 28, yy), f"  {part}", font=self.body_f, fill=color)
-                        yy += 26
-                    yy += 8
+                            draw.text((self.pad + 44, yy), f"  {part}", font=self.body_f, fill=color)
+                        yy += 44
+                    yy += 16
                 continue
             if kind == "footer":
                 text = el[1]
-                draw.line((self.pad, height - 52, self.width - self.pad, height - 52), fill=LINE, width=1)
-                draw.text((self.pad, height - 38), text, font=self.small_f, fill=MUTED)
+                draw.line((self.pad, height - 70, self.width - self.pad, height - 70), fill=LINE, width=2)
+                draw.text((self.pad, height - 52), text, font=self.small_f, fill=MUTED)
         return img
 
 
@@ -413,10 +459,9 @@ def _section_status_from_rows(statuses: list[Any]) -> tuple[str, tuple[int, int,
     return "—", MUTED
 
 
-def render_visibility_image(report: dict[str, Any], width: int = 1800) -> bytes:
-    """Return high-res PNG bytes for a mobile-zoomable status card with tables."""
-    # Mobile-friendly: tall card, wide logical canvas so pinch-zoom keeps sharp text.
-    width = max(1600, int(width))
+def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) -> bytes:
+    """Return Discord-mobile-readable PNG (large type, airy tables)."""
+    width = max(1400, int(width))
     c = _Canvas(width=width)
 
     overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
@@ -433,14 +478,13 @@ def render_visibility_image(report: dict[str, Any], width: int = 1800) -> bytes:
     osds = list(ceph.get("osds") or [])
 
     c.title_block(
-        title="ClusterMCP  ·  Visibility Report",
-        meta=f"Generated {report.get('generated_at', '—')}   ·   data_policy={report.get('data_policy', 'live_probes_only')}   ·   high-res mobile card",
+        title="ClusterMCP  ·  Visibility",
+        meta=f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  mobile large-type",
         overall_label=label,
         overall_color=color,
     )
-    c.gap(8)
+    c.gap(20)
 
-    # Cluster summary chips with icons
     cname = cluster.get("name") or "—"
     quorate = cluster.get("quorate")
     qtxt = "yes" if quorate is True else ("no" if quorate is False else "—")
@@ -452,21 +496,23 @@ def render_visibility_image(report: dict[str, Any], width: int = 1800) -> bytes:
         ("Nodes", node_s, OK if str(summary.get("nodes_online")) == str(summary.get("total_nodes")) else WARN),
         ("VMs", str(summary.get("total_vms", "—")), None),
         ("CTs", str(summary.get("total_containers", "—")), OK if summary.get("total_containers") else WARN),
-        ("Ceph", str(summary.get("ceph_health", ceph.get("health_status", "—"))), _status_color(summary.get("ceph_health", ceph.get("health_status")))[1]),
+        (
+            "Ceph",
+            str(summary.get("ceph_health", ceph.get("health_status", "—"))),
+            _status_color(summary.get("ceph_health", ceph.get("health_status")))[1],
+        ),
     ]
     if mcp:
         dirty = "dirty" if mcp.get("dirty") else "clean"
         chips.append(("MCP", f"{mcp.get('version', '—')}@{mcp.get('commit', '—')}", OK if dirty == "clean" else WARN))
-        chips.append(("PVE", str(mcp.get("pve_host", "—")), None))
         chips.append(("Git", f"{mcp.get('branch', '—')} · {dirty}", OK if dirty == "clean" else WARN))
-    c.section_header("Cluster summary", label, color, subtitle="Live probe snapshot — icons mark each fact")
+    c.section_header("Summary", label, color, subtitle="Live probe chips")
     c.kv_chips(chips)
-    c.gap(6)
+    c.gap(12)
 
-    # Nodes table
     node_statuses = [n.get("status") for n in nodes]
     ns_label, ns_color = _section_status_from_rows(node_statuses)
-    c.section_header("Nodes", ns_label, ns_color, subtitle=f"{len(nodes)} hosts from live inventory")
+    c.section_header("Nodes", ns_label, ns_color, subtitle=f"{len(nodes)} hosts")
     node_rows: list[tuple[str, tuple[int, int, int], list[str]]] = []
     for n in nodes:
         sk, sc = _status_color(n.get("status"))
@@ -477,52 +523,38 @@ def render_visibility_image(report: dict[str, Any], width: int = 1800) -> bytes:
                 [
                     str(n.get("node") or "—"),
                     str(n.get("status") or "—"),
-                    str(n.get("ip") or "—"),
                     str(n.get("cpu_human") or "—"),
                     str(n.get("mem_human") or "—"),
-                    str(n.get("containers_count", "—")),
-                    str(n.get("vms_count", "—")),
+                    f"CT {n.get('containers_count', '—')}",
                     str(n.get("uptime_human") or "—"),
                 ],
             )
         )
     c.table(
-        headers=["Node", "Status", "IP", "CPU", "Memory", "CTs", "VMs", "Uptime"],
-        col_weights=[1.4, 0.9, 1.3, 0.8, 1.5, 0.6, 0.6, 1.0],
+        headers=["Node", "Status", "CPU", "Memory", "CTs", "Uptime"],
+        col_weights=[1.5, 1.0, 0.9, 1.6, 0.8, 1.1],
         rows=node_rows,
-        row_h=48,
     )
 
-    # Ceph section
     health = ceph.get("health_status") or (ceph.get("health") or {}).get("status") or "—"
     hk, hc = _status_color(health)
-    # section badge
-    if osd_summary.get("detail_available") is False and warnings:
+    if osd_summary.get("detail_available") is False:
         sec_l, sec_c = "WARN", WARN
     else:
         sec_l, sec_c = ("OK", OK) if hk == "ok" else (("DOWN", BAD) if hk == "bad" else ("WARN", WARN))
     pg = ceph.get("pg_states") or {}
-    pg_str = ", ".join(f"{k}={v}" for k, v in sorted(pg.items(), key=lambda kv: -kv[1])[:6]) or "—"
-    c.section_header(
-        "Ceph",
-        sec_l,
-        sec_c,
-        subtitle=f"PGs: {pg_str}   ·   OSD source: {osd_summary.get('source') or '—'}",
+    pg_str = ", ".join(f"{k}={v}" for k, v in sorted(pg.items(), key=lambda kv: -kv[1])[:4]) or "—"
+    c.section_header("Ceph", sec_l, sec_c, subtitle=f"PGs {pg_str}")
+    c.kv_chips(
+        [
+            ("Health", str(health), hc),
+            ("MONs", str(ceph.get("mon_count") if ceph.get("mon_count") is not None else "—"), OK if ceph.get("mon_count") else WARN),
+            ("OSD up", str(osd_summary.get("up") if osd_summary.get("up") is not None else "—"), OK if osd_summary.get("up") else WARN),
+            ("OSD in", str(osd_summary.get("in") if osd_summary.get("in") is not None else "—"), OK if osd_summary.get("in") else WARN),
+            ("Total", str(osd_summary.get("total") if osd_summary.get("total") is not None else "—"), None),
+            ("Detail", "yes" if osd_summary.get("detail_available") else "no", OK if osd_summary.get("detail_available") else WARN),
+        ]
     )
-    ceph_chips = [
-        ("Health", str(health), hc),
-        ("MONs", str(ceph.get("mon_count") if ceph.get("mon_count") is not None else "—"), OK if ceph.get("mon_count") else WARN),
-        ("OSD total", str(osd_summary.get("total") if osd_summary.get("total") is not None else "—"), None),
-        ("OSD up", str(osd_summary.get("up") if osd_summary.get("up") is not None else "—"), OK if osd_summary.get("up") else WARN),
-        ("OSD in", str(osd_summary.get("in") if osd_summary.get("in") is not None else "—"), OK if osd_summary.get("in") else WARN),
-        (
-            "Detail",
-            "yes" if osd_summary.get("detail_available") else "no",
-            OK if osd_summary.get("detail_available") else WARN,
-        ),
-    ]
-    c.kv_chips(ceph_chips)
-
     if osds:
         osd_rows = []
         for o in osds:
@@ -531,112 +563,66 @@ def render_visibility_image(report: dict[str, Any], width: int = 1800) -> bytes:
             usage_s = f"{usage:.1f}%" if isinstance(usage, int | float) else "—"
             in_s = "yes" if o.get("in") is True else ("no" if o.get("in") is False else "—")
             osd_rows.append(
-                (
-                    sk,
-                    sc,
-                    [
-                        str(o.get("name") or "—"),
-                        str(o.get("status") or "—"),
-                        in_s,
-                        usage_s,
-                        str(o.get("node") or "—"),
-                    ],
-                )
+                (sk, sc, [str(o.get("name") or "—"), str(o.get("status") or "—"), in_s, usage_s, str(o.get("node") or "—")])
             )
         c.table(
             headers=["OSD", "Status", "In", "Usage", "Host"],
             col_weights=[1.0, 1.0, 0.7, 0.9, 1.2],
             rows=osd_rows,
-            row_h=46,
         )
     else:
-        c.table(
-            headers=["OSD detail"],
-            col_weights=[1.0],
-            rows=[
+        c.multiline_rows(
+            [
                 (
                     "warn",
                     WARN,
-                    ["Per-OSD utilization not available from live tree probe (not fabricated)"],
+                    "OSD tree detail unavailable",
+                    f"source={osd_summary.get('source') or '—'} · not fabricated",
                 )
             ],
-            row_h=48,
+            row_h=110,
         )
 
-    # Containers
     ct_statuses = [ct.get("status") for ct in containers]
     ct_l, ct_c = _section_status_from_rows(ct_statuses)
-    c.section_header("Containers", ct_l, ct_c, subtitle=f"{len(containers)} LXC from cluster/resources")
-    ct_rows = []
+    c.section_header("Containers", ct_l, ct_c, subtitle=f"{len(containers)} LXC")
+    ct_mrows: list[tuple[str, tuple[int, int, int], str, str]] = []
     for ct in containers:
         sk, sc = _status_color(ct.get("status"))
-        ct_rows.append(
-            (
-                sk,
-                sc,
-                [
-                    str(ct.get("vmid") or "—"),
-                    str(ct.get("name") or "—"),
-                    str(ct.get("node") or "—"),
-                    str(ct.get("status") or "—"),
-                    str(ct.get("cpu_human") or "—"),
-                    str(ct.get("mem_human") or "—"),
-                    str(ct.get("disk_human") or "—"),
-                    str(ct.get("uptime_human") or "—"),
-                    str(ct.get("tags") or "—"),
-                ],
-            )
+        tags = f" · {ct.get('tags')}" if ct.get("tags") else ""
+        primary = f"{ct.get('vmid')}  {ct.get('name')}  ·  {ct.get('node')}  ·  {ct.get('status')}"
+        secondary = (
+            f"CPU {ct.get('cpu_human') or '—'}   RAM {ct.get('mem_human') or '—'}   "
+            f"disk {ct.get('disk_human') or '—'}   up {ct.get('uptime_human') or '—'}{tags}"
         )
-    c.table(
-        headers=["VMID", "Name", "Node", "Status", "CPU", "Memory", "Disk", "Uptime", "Tags"],
-        col_weights=[0.7, 1.3, 1.2, 0.9, 0.7, 1.4, 1.4, 0.9, 1.3],
-        rows=ct_rows,
-        row_h=48,
-    )
+        ct_mrows.append((sk, sc, primary, secondary))
+    c.multiline_rows(ct_mrows, row_h=118)
 
-    # Storage
     st_statuses = [s.get("status") for s in storage]
     st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
-    c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} storage objects · fill% only when probe provides used bytes")
-    st_rows = []
+    c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} objects")
+    st_mrows: list[tuple[str, tuple[int, int, int], str, str]] = []
     for s in storage:
         sk, sc = _status_color(s.get("status"))
         ratio = s.get("ratio")
         ratio_s = f"{ratio * 100:.1f}%" if isinstance(ratio, float) else "—"
-        st_rows.append(
-            (
-                sk,
-                sc,
-                [
-                    str(s.get("node") or "—"),
-                    str(s.get("storage") or "—"),
-                    str(s.get("type") or "—"),
-                    str(s.get("status") or "—"),
-                    str(s.get("used_human") or "—"),
-                    str(s.get("total_human") or "—"),
-                    ratio_s,
-                ],
-            )
+        primary = f"{s.get('node')}/{s.get('storage')}  ·  {s.get('status')}"
+        secondary = (
+            f"{s.get('type') or '—'}   used {s.get('used_human') or '—'} / {s.get('total_human') or '—'}   fill {ratio_s}"
         )
-    c.table(
-        headers=["Node", "Storage", "Type", "Status", "Used", "Total", "Fill"],
-        col_weights=[1.2, 1.4, 1.0, 1.0, 1.0, 1.2, 0.7],
-        rows=st_rows,
-        row_h=46,
-    )
+        st_mrows.append((sk, sc, primary, secondary))
+    c.multiline_rows(st_mrows, row_h=110)
 
-    # Attention
     if warnings:
-        c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s) from live probes")
-        c.bullet_block(WARN, [(str(w), WARN) for w in warnings])
+        c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s)")
+        c.bullet_block([(str(w), WARN) for w in warnings])
     else:
-        c.section_header("Attention", "OK", OK, subtitle="No warnings from live probes")
-        c.bullet_block(OK, [("No warnings from live probes.", OK)])
+        c.section_header("Attention", "OK", OK, subtitle="No warnings")
+        c.bullet_block([("No warnings from live probes.", OK)])
 
-    c.footer("Stronghold · live PVE/Ceph probes via ClusterMCP · no recalled metrics · pinch-zoom safe")
+    c.footer("Stronghold · live probes only · large-type Discord mobile card")
 
     img = c.render()
     buf = io.BytesIO()
-    # high quality PNG; optimize keeps size reasonable without killing sharp text
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="PNG", optimize=False, compress_level=6)
     return buf.getvalue()
