@@ -195,9 +195,9 @@ class _Canvas:
         self.small_f = _font(max(int(self.body_px * 0.72), 36))
         self.chip_f = _font(max(int(self.body_px * 0.78), 40))
         self.icon = max(28, int(self.body_px * 0.5))
-        self.row_h = max(56, int(self.body_px * 1.3))
-        self.header_h = max(48, int(self.body_px * 1.1))
-        self.section_h = max(56, int(self.body_px * 1.25))
+        self.row_h = max(64, int(self.body_px * 1.55))
+        self.header_h = max(56, int(self.body_px * 1.3))
+        self.section_h = max(68, int(self.body_px * 1.5))
         self.scratch = Image.new("RGB", (self.width, max(120, self.body_px * 2)), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
@@ -205,20 +205,20 @@ class _Canvas:
         """Scale a base design unit by type density (not merely canvas width)."""
         return max(1, int(round(float(n) * self.scale)))
 
-    def gap(self, n: int = 36) -> None:
+    def gap(self, n: int = 48) -> None:
         g = self.u(n)
         self.elements.append(("gap", g))
         self.y += g
 
     def title_block(self, title: str, meta: str, overall_label: str, overall_color: tuple[int, int, int]) -> None:
         self.elements.append(("title", self.y, title, meta, overall_label, overall_color))
-        # ~ title + meta + overall pill — tied to body, not inflated base units
-        self.y += int(self.body_px * 3.6) + self.u(24)
+        # ~ title + meta + overall pill — airy vertical breathing room
+        self.y += int(self.body_px * 4.3) + self.u(28)
 
     def section_header(self, name: str, status_label: str, status_color: tuple[int, int, int], subtitle: str = "") -> None:
-        h = self.section_h + (int(self.body_px * 0.55) if subtitle else 0)
+        h = self.section_h + (int(self.body_px * 0.7) if subtitle else 0)
         self.elements.append(("section", self.y, name, status_label, status_color, subtitle, h))
-        self.y += h + int(self.body_px * 0.25)
+        self.y += h + int(self.body_px * 0.4)
 
     def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
         x = 0
@@ -228,16 +228,16 @@ class _Canvas:
         for label, value, vcolor in items:
             text = f"{label}  {value}"
             tw, th = _text_size(self.d0, text, self.chip_f)
-            chip_w = tw + (int(self.body_px * 0.7) if vcolor else int(self.body_px * 0.45))
-            chip_h = th + int(self.body_px * 0.35)
+            chip_w = tw + (int(self.body_px * 0.75) if vcolor else int(self.body_px * 0.5))
+            chip_h = th + int(self.body_px * 0.45)
             row_h = max(row_h, chip_h)
             if x + chip_w > max_w and x > 0:
                 rows += 1
                 x = 0
-            x += chip_w + int(self.body_px * 0.2)
-        total_h = rows * (row_h + int(self.body_px * 0.18)) + 4
+            x += chip_w + int(self.body_px * 0.25)
+        total_h = rows * (row_h + int(self.body_px * 0.25)) + 6
         self.elements.append(("chips", self.y, items, total_h))
-        self.y += total_h + int(self.body_px * 0.2)
+        self.y += total_h + int(self.body_px * 0.35)
 
     def table(
         self,
@@ -246,22 +246,22 @@ class _Canvas:
         rows: list[tuple[str, tuple[int, int, int], list[str]]],
         row_h: int | None = None,
     ) -> None:
-        rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.25))
+        rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.45))
         hh = self.header_h
-        h = hh + max(1, len(rows)) * rh + 8
+        h = hh + max(1, len(rows)) * rh + 10
         self.elements.append(("table", self.y, headers, col_weights, rows, rh, hh, h))
-        self.y += h + int(self.body_px * 0.25)
+        self.y += h + int(self.body_px * 0.4)
 
     def multiline_rows(
         self,
         rows: list[tuple[str, tuple[int, int, int], str, str]],
         row_h: int = 100,
     ) -> None:
-        # Two-line rows sized from body_px (ignore inflated design-unit scale)
-        rh = max(int(self.body_px * 1.55), int(self.row_h * 1.05))
-        h = max(1, len(rows)) * rh + 6
+        # Two-line rows with comfortable vertical padding
+        rh = max(int(self.body_px * 1.85), int(self.row_h * 1.15))
+        h = max(1, len(rows)) * rh + 8
         self.elements.append(("mrows", self.y, rows, rh, h))
-        self.y += h + int(self.body_px * 0.2)
+        self.y += h + int(self.body_px * 0.35)
 
     def multiline_rows_2col(
         self,
@@ -269,13 +269,12 @@ class _Canvas:
         row_h: int = 100,
         cols: int = 2,
     ) -> None:
-        """Multi-column list pack — cuts height so single-image width survives Discord."""
+        """Multi-column list pack — keeps width Discord-safe while staying airy."""
         cols = max(2, min(3, int(cols)))
-        rh = max(int(self.body_px * 1.45), int(self.row_h * 1.0))
+        rh = max(int(self.body_px * 1.85), int(self.row_h * 1.15))
         if not rows:
             self.multiline_rows(rows, row_h=row_h)
             return
-        # split into N columns round-robin by contiguous chunks
         chunk = (len(rows) + cols - 1) // cols
         columns: list[list] = []
         for i in range(cols):
@@ -285,9 +284,9 @@ class _Canvas:
         for c in columns:
             while len(c) < max_len:
                 c.append(("muted", MUTED, "", ""))
-        h = max_len * rh + 6
+        h = max_len * rh + 8
         self.elements.append(("mrowsN", self.y, columns, rh, h, cols))
-        self.y += h + int(self.body_px * 0.15)
+        self.y += h + int(self.body_px * 0.3)
 
     def bullet_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         total = self.u(16)
@@ -533,9 +532,9 @@ class _Canvas:
                             max_w = col_w - u(64)
                             p = _fit_cell(draw, primary, self.mono_f, max_w)
                             s = _fit_cell(draw, secondary, self.small_f, max_w)
-                            draw.text((x0 + u(40), ry + u(8)), p, font=self.mono_f, fill=TEXT)
+                            draw.text((x0 + u(40), ry + u(14)), p, font=self.mono_f, fill=TEXT)
                             draw.text(
-                                (x0 + u(40), ry + u(8) + max(26, int(self.body_px * 0.65))),
+                                (x0 + u(40), ry + u(14) + max(32, int(self.body_px * 0.75))),
                                 s,
                                 font=self.small_f,
                                 fill=MUTED,
@@ -605,7 +604,7 @@ def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, inclu
         overall_label=label,
         overall_color=color,
     )
-    c.gap(20)
+    c.gap(28)
 
     cname = cluster.get("name") or "—"
     quorate = cluster.get("quorate")
@@ -630,7 +629,7 @@ def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, inclu
         chips.append(("Git", f"{mcp.get('branch', '—')} · {dirty}", OK if dirty == "clean" else WARN))
     c.section_header("Summary", label, color, subtitle="Live probe chips")
     c.kv_chips(chips)
-    c.gap(12)
+    c.gap(20)
 
     node_statuses = [n.get("status") for n in nodes]
     ns_label, ns_color = _section_status_from_rows(node_statuses)
@@ -830,6 +829,7 @@ def render_visibility_image(
             f"disk {ct.get('disk_human') or '—'}   up {ct.get('uptime_human') or '—'}{tags}"
         )
         ct_mrows.append((sk, sc, primary, secondary))
+    # Prefer 2-col storage as well for a bit more row height headroom (was 3-col tighter)
     c.multiline_rows_2col(ct_mrows, row_h=100, cols=2)
     st_statuses = [s.get("status") for s in storage]
     st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
@@ -844,7 +844,7 @@ def render_visibility_image(
             f"{s.get('type') or '—'}   used {s.get('used_human') or '—'} / {s.get('total_human') or '—'}   fill {ratio_s}"
         )
         st_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows_2col(st_mrows, row_h=100, cols=3)
+    c.multiline_rows_2col(st_mrows, row_h=100, cols=2)
     if warnings:
         c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s)")
         c.bullet_block([(str(w), WARN) for w in warnings])
