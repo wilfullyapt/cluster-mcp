@@ -181,26 +181,26 @@ class _Canvas:
         # body_px chosen for TARGET_BODY_CSS_PX at phone fit-width:
         # body_css ≈ body_px * PHONE_COL / width
         raw_body = int(round(float(target_body_css) * self.width / float(phone_col_css)))
-        # Soft ceiling only to avoid pathological giants; 24 CSS @ 4096 ≈ 252px
-        self.body_px = max(72, min(raw_body, 280))
+        # Soft ceiling: large enough to read, not so large single-card height
+        # blows Discord long-edge (which shrinks the whole attachment).
+        self.body_px = max(72, min(raw_body, 200))
         self.scale = self.body_px / 58.0
-        self.pad = max(36, int(self.body_px * 0.28))
+        self.pad = max(32, int(self.body_px * 0.25))
         self.content_w = self.width - self.pad * 2
         self.y = self.pad
         self.elements: list[tuple] = []
-        self.title_f = _font(max(self.body_px + 18, 84), bold=True)
-        self.head_f = _font(max(self.body_px - 2, 64), bold=True)
-        self.sub_f = _font(max(int(self.body_px * 0.68), 40), bold=True)
+        self.title_f = _font(max(self.body_px + 14, 72), bold=True)
+        self.head_f = _font(max(self.body_px - 4, 56), bold=True)
+        self.sub_f = _font(max(int(self.body_px * 0.65), 36), bold=True)
         self.body_f = _font(self.body_px)
-        self.mono_f = _font(max(int(self.body_px * 0.9), 56))
-        self.small_f = _font(max(int(self.body_px * 0.7), 40))
-        self.chip_f = _font(max(int(self.body_px * 0.78), 44))
-        self.attn_f = _font(max(int(self.body_px * 0.52), 32))
-        self.icon = max(32, int(self.body_px * 0.48))
-        # Balanced: readable rows without exploding height (Discord long-edge)
-        self.row_h = max(70, int(self.body_px * 1.45))
-        self.header_h = max(58, int(self.body_px * 1.2))
-        self.section_h = max(70, int(self.body_px * 1.4))
+        self.mono_f = _font(max(int(self.body_px * 0.88), 48))
+        self.small_f = _font(max(int(self.body_px * 0.68), 36))
+        self.chip_f = _font(max(int(self.body_px * 0.75), 40))
+        self.attn_f = _font(max(int(self.body_px * 0.5), 30))
+        self.icon = max(28, int(self.body_px * 0.45))
+        self.row_h = max(60, int(self.body_px * 1.3))
+        self.header_h = max(50, int(self.body_px * 1.1))
+        self.section_h = max(60, int(self.body_px * 1.25))
         self.scratch = Image.new("RGB", (self.width, max(120, self.body_px * 2)), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
@@ -215,13 +215,12 @@ class _Canvas:
 
     def title_block(self, title: str, meta: str, overall_label: str, overall_color: tuple[int, int, int]) -> None:
         self.elements.append(("title", self.y, title, meta, overall_label, overall_color))
-        # ~ title + meta + overall pill — airy vertical breathing room
-        self.y += int(self.body_px * 4.3) + self.u(28)
+        self.y += int(self.body_px * 3.8) + 20
 
     def section_header(self, name: str, status_label: str, status_color: tuple[int, int, int], subtitle: str = "") -> None:
-        h = self.section_h + (int(self.body_px * 0.75) if subtitle else 0)
+        h = self.section_h + (int(self.body_px * 0.55) if subtitle else 0)
         self.elements.append(("section", self.y, name, status_label, status_color, subtitle, h))
-        self.y += h + int(self.body_px * 0.5)
+        self.y += h + int(self.body_px * 0.3)
 
     def kv_chips(self, items: list[tuple[str, str, tuple[int, int, int] | None]]) -> None:
         x = 0
@@ -231,16 +230,16 @@ class _Canvas:
         for label, value, vcolor in items:
             text = f"{label}  {value}"
             tw, th = _text_size(self.d0, text, self.chip_f)
-            chip_w = tw + (int(self.body_px * 0.75) if vcolor else int(self.body_px * 0.5))
-            chip_h = th + int(self.body_px * 0.5)
+            chip_w = tw + (int(self.body_px * 0.65) if vcolor else int(self.body_px * 0.4))
+            chip_h = th + int(self.body_px * 0.35)
             row_h = max(row_h, chip_h)
             if x + chip_w > max_w and x > 0:
                 rows += 1
                 x = 0
-            x += chip_w + int(self.body_px * 0.28)
-        total_h = rows * (row_h + int(self.body_px * 0.3)) + 8
+            x += chip_w + int(self.body_px * 0.18)
+        total_h = rows * (row_h + int(self.body_px * 0.18)) + 4
         self.elements.append(("chips", self.y, items, total_h))
-        self.y += total_h + int(self.body_px * 0.45)
+        self.y += total_h + int(self.body_px * 0.25)
 
     def table(
         self,
@@ -249,11 +248,11 @@ class _Canvas:
         rows: list[tuple[str, tuple[int, int, int], list[str]]],
         row_h: int | None = None,
     ) -> None:
-        rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.55))
+        rh = self.row_h if row_h is None else max(self.row_h, int(self.body_px * 1.25))
         hh = self.header_h
-        h = hh + max(1, len(rows)) * rh + 12
+        h = hh + max(1, len(rows)) * rh + 8
         self.elements.append(("table", self.y, headers, col_weights, rows, rh, hh, h))
-        self.y += h + int(self.body_px * 0.5)
+        self.y += h + int(self.body_px * 0.28)
 
     def multiline_rows(
         self,
@@ -261,12 +260,11 @@ class _Canvas:
         row_h: int = 100,
         single_line: bool = False,
     ) -> None:
-        # single_line packs denser while keeping large primary type
-        mult = 1.25 if single_line else 1.7
-        rh = max(int(self.body_px * mult), int(self.row_h * (0.95 if single_line else 1.1)))
-        h = max(1, len(rows)) * rh + 10
+        mult = 1.15 if single_line else 1.55
+        rh = max(int(self.body_px * mult), int(self.row_h * (0.9 if single_line else 1.05)))
+        h = max(1, len(rows)) * rh + 8
         self.elements.append(("mrows", self.y, rows, rh, h, single_line))
-        self.y += h + int(self.body_px * 0.35)
+        self.y += h + int(self.body_px * 0.25)
 
     def multiline_rows_2col(
         self,
@@ -275,10 +273,9 @@ class _Canvas:
         cols: int = 2,
         single_line: bool = True,
     ) -> None:
-        """Multi-column pack — large type, controlled height for Discord."""
         cols = max(2, min(3, int(cols)))
-        mult = 1.25 if single_line else 1.7
-        rh = max(int(self.body_px * mult), int(self.row_h * (0.95 if single_line else 1.1)))
+        mult = 1.15 if single_line else 1.55
+        rh = max(int(self.body_px * mult), int(self.row_h * (0.9 if single_line else 1.05)))
         if not rows:
             self.multiline_rows(rows, row_h=row_h, single_line=single_line)
             return
@@ -291,9 +288,9 @@ class _Canvas:
         for c in columns:
             while len(c) < max_len:
                 c.append(("muted", MUTED, "", ""))
-        h = max_len * rh + 10
+        h = max_len * rh + 8
         self.elements.append(("mrowsN", self.y, columns, rh, h, cols, single_line))
-        self.y += h + int(self.body_px * 0.35)
+        self.y += h + int(self.body_px * 0.25)
 
     def attention_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         """Compact Attention: smaller type, one next-step line each."""
@@ -666,7 +663,7 @@ def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, inclu
         overall_label=label,
         overall_color=color,
     )
-    c.gap(28)
+    c.gap(16)
 
     cname = cluster.get("name") or "—"
     quorate = cluster.get("quorate")
@@ -691,7 +688,7 @@ def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, inclu
         chips.append(("Git", f"{mcp.get('branch', '—')} · {dirty}", OK if dirty == "clean" else WARN))
     c.section_header("Summary", label, color, subtitle="Live probe chips")
     c.kv_chips(chips)
-    c.gap(20)
+    c.gap(12)
 
     node_statuses = [n.get("status") for n in nodes]
     ns_label, ns_color = _section_status_from_rows(node_statuses)
