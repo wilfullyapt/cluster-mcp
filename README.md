@@ -19,8 +19,8 @@ Use or adapt `scripts/create-lxc.sh` (update IP to YOUR_MCP_LXC_IP/24, CTID, sto
 # Install deps
 apt update && apt install -y python3 python3-venv python3-pip git curl
 
-# Clone (after repo is public/pushed)
-git clone https://github.com/wilfullyapt/clustermcp.git /opt/clustermcp
+# Clone (GitHub remote still proxmox-mcp until Wil renames the repo)
+git clone https://github.com/wilfullyapt/proxmox-mcp.git /opt/clustermcp
 cd /opt/clustermcp
 
 # Setup

@@ -30,3 +30,8 @@ env/
 .DS_Store
 *.log
 *.bak
+.pytest_cache/
+.ruff_cache/
+coverage.xml
+.coverage
+htmlcov/

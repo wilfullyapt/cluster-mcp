@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build Docker image
-        run: docker build -t proxmox-mcp:test .
+        run: docker build -t clustermcp:test .
 
   security-scan:
     runs-on: ubuntu-latest
