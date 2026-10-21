@@ -28,11 +28,13 @@ ACCENT = (56, 189, 248)
 LINE = (48, 58, 78)
 ICON_RING = (12, 14, 22)
 
-# Design base is 1600 logical units. Default export is 2× (3200px) for
-# Discord zoom sharpness. Type scales with width so fit-width on ~390px
-# phone stays ~14 CSS-px body: body_px ≈ 14 * width / 390.
+# Export geometry
 BASE_WIDTH = 1600
-DEFAULT_WIDTH = 3200  # 2× wide, 2× glyph pixels vs prior card
+DEFAULT_WIDTH = 3200  # wide canvas for zoom headroom
+# Discord phone column ~390 CSS-px. Prior cards targeted ~14px body and looked
+# identical when only width×fonts scaled together. Target higher on-screen type.
+PHONE_COL_CSS = 390
+TARGET_BODY_CSS_PX = 22  # visibly larger than prior ~14px fit-width body
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -165,32 +167,40 @@ def _cell_fill(cell: str) -> tuple[int, int, int]:
 
 
 class _Canvas:
-    """Layout in BASE_WIDTH design units, rasterized at `width` (default 2×)."""
+    """Wide export + independent type density for Discord fit-width readability."""
 
-    def __init__(self, width: int = DEFAULT_WIDTH):
+    def __init__(
+        self,
+        width: int = DEFAULT_WIDTH,
+        target_body_css: float = TARGET_BODY_CSS_PX,
+        phone_col_css: float = PHONE_COL_CSS,
+    ):
         self.width = int(width)
-        self.scale = self.width / float(BASE_WIDTH)
+        # Type density is driven by desired on-screen CSS px, NOT only width ratio.
+        # body_px = target_css * width / phone_col  → stays readable after Discord shrink.
+        self.body_px = max(48, int(round(float(target_body_css) * self.width / float(phone_col_css))))
+        # Spacing/layout scale follows body (base design body was 58 at 1600).
+        self.scale = self.body_px / 58.0
         self.pad = self.u(64)
         self.content_w = self.width - self.pad * 2
         self.y = self.pad
         self.elements: list[tuple] = []
-        # Base design (1600): body 58 → at 3200 becomes 116px glyphs
-        self.title_f = _font(self.u(78), bold=True)
-        self.head_f = _font(self.u(56), bold=True)
-        self.sub_f = _font(self.u(40), bold=True)
-        self.body_f = _font(self.u(58))
-        self.mono_f = _font(self.u(52))
-        self.small_f = _font(self.u(42))
-        self.chip_f = _font(self.u(46))
-        self.icon = self.u(40)
-        self.row_h = self.u(120)
-        self.header_h = self.u(96)
-        self.section_h = self.u(120)
-        self.scratch = Image.new("RGB", (self.width, self.u(160)), BG)
+        self.title_f = _font(max(self.body_px + 24, self.u(78)), bold=True)
+        self.head_f = _font(max(self.body_px - 2, self.u(56)), bold=True)
+        self.sub_f = _font(max(int(self.body_px * 0.72), self.u(40)), bold=True)
+        self.body_f = _font(self.body_px)
+        self.mono_f = _font(max(int(self.body_px * 0.90), self.u(52)))
+        self.small_f = _font(max(int(self.body_px * 0.78), self.u(42)))
+        self.chip_f = _font(max(int(self.body_px * 0.82), self.u(46)))
+        self.icon = max(self.u(40), int(self.body_px * 0.7))
+        self.row_h = max(self.u(120), int(self.body_px * 2.2))
+        self.header_h = max(self.u(96), int(self.body_px * 1.7))
+        self.section_h = max(self.u(120), int(self.body_px * 2.2))
+        self.scratch = Image.new("RGB", (self.width, max(160, self.u(160))), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
     def u(self, n: float | int) -> int:
-        """Scale a base-1600 design unit to export pixels."""
+        """Scale a base design unit by type density (not merely canvas width)."""
         return max(1, int(round(float(n) * self.scale)))
 
     def gap(self, n: int = 36) -> None:
@@ -463,6 +473,7 @@ class _Canvas:
         return img
 
 
+
 def _section_status_from_rows(statuses: list[Any]) -> tuple[str, tuple[int, int, int]]:
     kinds = [_status_color(s) for s in statuses]
     if any(k == "bad" for k, _ in kinds):
@@ -474,11 +485,7 @@ def _section_status_from_rows(statuses: list[Any]) -> tuple[str, tuple[int, int,
     return "—", MUTED
 
 
-def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) -> bytes:
-    """Return Discord-mobile-readable PNG (large type, airy tables)."""
-    width = max(BASE_WIDTH, int(width))
-    c = _Canvas(width=width)
-
+def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
     overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
     label, color = _traffic(overall)
     cluster = report.get("cluster") or {}
@@ -486,15 +493,16 @@ def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) 
     ceph = report.get("ceph") or {}
     osd_summary = ceph.get("osd_summary") or {}
     mcp = report.get("mcp") or {}
-    warnings = list(report.get("warnings") or [])
     nodes = list(report.get("node_inventory") or [])
-    containers = list(report.get("containers") or [])
-    storage = list(report.get("storage") or [])
     osds = list(ceph.get("osds") or [])
+    width = c.width
 
     c.title_block(
         title="ClusterMCP  ·  Visibility",
-        meta=f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  {width}px 2× export",
+        meta=(
+            f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  "
+            f"{width}px  ·  body {c.body_px}px  ·  {page_label}"
+        ),
         overall_label=label,
         overall_color=color,
     )
@@ -553,10 +561,9 @@ def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) 
 
     health = ceph.get("health_status") or (ceph.get("health") or {}).get("status") or "—"
     hk, hc = _status_color(health)
-    if osd_summary.get("detail_available") is False:
-        sec_l, sec_c = "WARN", WARN
-    else:
-        sec_l, sec_c = ("OK", OK) if hk == "ok" else (("DOWN", BAD) if hk == "bad" else ("WARN", WARN))
+    sec_l, sec_c = ("WARN", WARN) if osd_summary.get("detail_available") is False else (
+        ("OK", OK) if hk == "ok" else (("DOWN", BAD) if hk == "bad" else ("WARN", WARN))
+    )
     pg = ceph.get("pg_states") or {}
     pg_str = ", ".join(f"{k}={v}" for k, v in sorted(pg.items(), key=lambda kv: -kv[1])[:4]) or "—"
     c.section_header("Ceph", sec_l, sec_c, subtitle=f"PGs {pg_str}")
@@ -597,10 +604,23 @@ def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) 
             ],
             row_h=140,
         )
+    c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · {page_label}")
 
+
+def _fill_containers(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
+    overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
+    label, color = _traffic(overall)
+    containers = list(report.get("containers") or [])
+    c.title_block(
+        title="ClusterMCP  ·  Containers",
+        meta=f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  {c.width}px  ·  body {c.body_px}px  ·  {page_label}",
+        overall_label=label,
+        overall_color=color,
+    )
+    c.gap(16)
     ct_statuses = [ct.get("status") for ct in containers]
     ct_l, ct_c = _section_status_from_rows(ct_statuses)
-    c.section_header("Containers", ct_l, ct_c, subtitle=f"{len(containers)} LXC")
+    c.section_header("Containers", ct_l, ct_c, subtitle=f"{len(containers)} LXC from cluster/resources")
     ct_mrows: list[tuple[str, tuple[int, int, int], str, str]] = []
     for ct in containers:
         sk, sc = _status_color(ct.get("status"))
@@ -612,7 +632,21 @@ def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) 
         )
         ct_mrows.append((sk, sc, primary, secondary))
     c.multiline_rows(ct_mrows, row_h=150)
+    c.footer(f"Stronghold · live probes · {c.width}px · body {c.body_px}px · {page_label}")
 
+
+def _fill_storage(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
+    overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
+    label, color = _traffic(overall)
+    storage = list(report.get("storage") or [])
+    warnings = list(report.get("warnings") or [])
+    c.title_block(
+        title="ClusterMCP  ·  Storage + Attention",
+        meta=f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  {c.width}px  ·  body {c.body_px}px  ·  {page_label}",
+        overall_label=label,
+        overall_color=color,
+    )
+    c.gap(16)
     st_statuses = [s.get("status") for s in storage]
     st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
     c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} objects")
@@ -634,10 +668,89 @@ def render_visibility_image(report: dict[str, Any], width: int = DEFAULT_WIDTH) 
     else:
         c.section_header("Attention", "OK", OK, subtitle="No warnings")
         c.bullet_block([("No warnings from live probes.", OK)])
+    c.footer(f"Stronghold · live probes · {c.width}px · body {c.body_px}px · {page_label}")
 
-    c.footer(f"Stronghold · live probes only · {width}× export · large-type Discord card")
 
-    img = c.render()
+def _png_bytes(img: Image.Image) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=False, compress_level=6)
     return buf.getvalue()
+
+
+def render_visibility_pages(
+    report: dict[str, Any],
+    width: int = DEFAULT_WIDTH,
+    target_body_css: float = TARGET_BODY_CSS_PX,
+) -> list[tuple[str, bytes]]:
+    """Return multiple full-width PNG pages (overview, containers, storage).
+
+    Multi-page avoids Discord crushing one ultra-tall strip; larger target_body_css
+    makes fit-width text actually bigger (not just a proportional 2× of the old card).
+    """
+    width = max(BASE_WIDTH, int(width))
+    pages: list[tuple[str, bytes]] = []
+
+    c1 = _Canvas(width=width, target_body_css=target_body_css)
+    _fill_overview(c1, report, "page 1/3 overview")
+    pages.append(("01-overview", _png_bytes(c1.render())))
+
+    c2 = _Canvas(width=width, target_body_css=target_body_css)
+    _fill_containers(c2, report, "page 2/3 containers")
+    pages.append(("02-containers", _png_bytes(c2.render())))
+
+    c3 = _Canvas(width=width, target_body_css=target_body_css)
+    _fill_storage(c3, report, "page 3/3 storage")
+    pages.append(("03-storage", _png_bytes(c3.render())))
+
+    return pages
+
+
+def render_visibility_image(
+    report: dict[str, Any],
+    width: int = DEFAULT_WIDTH,
+    target_body_css: float = TARGET_BODY_CSS_PX,
+) -> bytes:
+    """Single-image fallback: overview page only (prefer render_visibility_pages)."""
+    width = max(BASE_WIDTH, int(width))
+    c = _Canvas(width=width, target_body_css=target_body_css)
+    _fill_overview(c, report, "single overview")
+    # append containers + storage onto one tall card for API compatibility
+    containers = list(report.get("containers") or [])
+    storage = list(report.get("storage") or [])
+    warnings = list(report.get("warnings") or [])
+    ct_statuses = [ct.get("status") for ct in containers]
+    ct_l, ct_c = _section_status_from_rows(ct_statuses)
+    c.section_header("Containers", ct_l, ct_c, subtitle=f"{len(containers)} LXC")
+    ct_mrows = []
+    for ct in containers:
+        sk, sc = _status_color(ct.get("status"))
+        tags = f" · {ct.get('tags')}" if ct.get("tags") else ""
+        primary = f"{ct.get('vmid')}  {ct.get('name')}  ·  {ct.get('node')}  ·  {ct.get('status')}"
+        secondary = (
+            f"CPU {ct.get('cpu_human') or '—'}   RAM {ct.get('mem_human') or '—'}   "
+            f"disk {ct.get('disk_human') or '—'}   up {ct.get('uptime_human') or '—'}{tags}"
+        )
+        ct_mrows.append((sk, sc, primary, secondary))
+    c.multiline_rows(ct_mrows, row_h=150)
+    st_statuses = [s.get("status") for s in storage]
+    st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
+    c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} objects")
+    st_mrows = []
+    for s in storage:
+        sk, sc = _status_color(s.get("status"))
+        ratio = s.get("ratio")
+        ratio_s = f"{ratio * 100:.1f}%" if isinstance(ratio, float) else "—"
+        primary = f"{s.get('node')}/{s.get('storage')}  ·  {s.get('status')}"
+        secondary = (
+            f"{s.get('type') or '—'}   used {s.get('used_human') or '—'} / {s.get('total_human') or '—'}   fill {ratio_s}"
+        )
+        st_mrows.append((sk, sc, primary, secondary))
+    c.multiline_rows(st_mrows, row_h=140)
+    if warnings:
+        c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s)")
+        c.bullet_block([(str(w), WARN) for w in warnings])
+    else:
+        c.section_header("Attention", "OK", OK, subtitle="No warnings")
+        c.bullet_block([("No warnings from live probes.", OK)])
+    c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · single")
+    return _png_bytes(c.render())

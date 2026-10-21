@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from services.visibility_builder import build_visibility_report  # noqa: E402
-from services.visibility_image import render_visibility_image  # noqa: E402
+from services.visibility_image import render_visibility_image, render_visibility_pages  # noqa: E402
 
 
 def http_get_json(url: str, timeout: float = 30.0) -> tuple[Any | None, str | None]:
@@ -44,10 +44,15 @@ def http_get_json(url: str, timeout: float = 30.0) -> tuple[Any | None, str | No
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://192.168.0.233:8000", help="ClusterMCP base URL")
-    parser.add_argument("--out", required=True, help="Output PNG path")
+    parser.add_argument("--out", required=True, help="Output PNG path (page mode writes -01/-02/-03 siblings)")
     parser.add_argument("--json-out", default="", help="Optional JSON report path")
+    parser.add_argument("--pages", action="store_true", default=True, help="Write 3 full-width pages (default)")
+    parser.add_argument("--single", action="store_true", help="Write one tall single image instead of pages")
+    parser.add_argument("--width", type=int, default=3200, help="Export width in pixels")
+    parser.add_argument("--body-css", type=float, default=22.0, help="Target body CSS-px at 390px phone column")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
+    use_pages = not args.single
 
     probe_errors: dict[str, str] = {}
 
@@ -130,10 +135,27 @@ def main() -> int:
                 f"detail=False source={summary.get('source')}"
             )
 
-    png = render_visibility_image(report)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(png)
+    page_paths: list[str] = []
+    if use_pages:
+        pages = render_visibility_pages(report, width=args.width, target_body_css=args.body_css)
+        stem = out.stem
+        suffix = out.suffix or ".png"
+        parent = out.parent
+        for name, blob in pages:
+            # e.g. report-01-overview.png plus also write primary out as page 1
+            p = parent / f"{stem}-{name}{suffix}"
+            p.write_bytes(blob)
+            page_paths.append(str(p))
+        # primary --out is page 1 for MEDIA convenience
+        out.write_bytes(pages[0][1])
+        primary_bytes = len(pages[0][1])
+    else:
+        png = render_visibility_image(report, width=args.width, target_body_css=args.body_css)
+        out.write_bytes(png)
+        primary_bytes = len(png)
+        page_paths = [str(out)]
 
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
@@ -143,7 +165,10 @@ def main() -> int:
             {
                 "ok": True,
                 "out": str(out),
-                "bytes": len(png),
+                "pages": page_paths,
+                "bytes": primary_bytes,
+                "width": args.width,
+                "body_css_target": args.body_css,
                 "generated_at": report.get("generated_at"),
                 "overall": report.get("overall"),
                 "warnings_count": len(report.get("warnings") or []),
