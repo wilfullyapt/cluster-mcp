@@ -34,7 +34,9 @@ ICON_RING = (12, 14, 22)
 BASE_WIDTH = 1600
 DEFAULT_WIDTH = 4096
 PHONE_COL_CSS = 390
-TARGET_BODY_CSS_PX = 20
+# Fit-width target on ~390px Discord column. Do not cap body so low that text
+# is unreadable after Discord shows the attachment full-bleed.
+TARGET_BODY_CSS_PX = 24
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -176,29 +178,29 @@ class _Canvas:
         phone_col_css: float = PHONE_COL_CSS,
     ):
         self.width = int(width)
-        # Desired fit-width CSS size, but CAP body px so a single tall card
-        # does not exceed Discord long-edge limits (which collapses width).
+        # body_px chosen for TARGET_BODY_CSS_PX at phone fit-width:
+        # body_css ≈ body_px * PHONE_COL / width
         raw_body = int(round(float(target_body_css) * self.width / float(phone_col_css)))
-        # ~160px body @ 4096w ≈ 15 CSS-px on phone AND keeps height manageable
-        self.body_px = max(64, min(raw_body, 160))
-        # Spacing/layout scale follows body (base design body was 58 at 1600).
+        # Soft ceiling only to avoid pathological giants; 24 CSS @ 4096 ≈ 252px
+        self.body_px = max(72, min(raw_body, 280))
         self.scale = self.body_px / 58.0
-        self.pad = max(40, int(self.body_px * 0.35))
+        self.pad = max(36, int(self.body_px * 0.28))
         self.content_w = self.width - self.pad * 2
         self.y = self.pad
         self.elements: list[tuple] = []
-        self.title_f = _font(max(self.body_px + 20, 72), bold=True)
-        self.head_f = _font(max(self.body_px - 4, 52), bold=True)
-        self.sub_f = _font(max(int(self.body_px * 0.7), 36), bold=True)
+        self.title_f = _font(max(self.body_px + 18, 84), bold=True)
+        self.head_f = _font(max(self.body_px - 2, 64), bold=True)
+        self.sub_f = _font(max(int(self.body_px * 0.68), 40), bold=True)
         self.body_f = _font(self.body_px)
-        self.mono_f = _font(max(int(self.body_px * 0.88), 48))
-        self.small_f = _font(max(int(self.body_px * 0.72), 36))
-        self.chip_f = _font(max(int(self.body_px * 0.78), 40))
-        self.attn_f = _font(max(int(self.body_px * 0.55), 28))  # smaller Attention copy
-        self.icon = max(28, int(self.body_px * 0.5))
-        self.row_h = max(72, int(self.body_px * 1.7))
-        self.header_h = max(60, int(self.body_px * 1.4))
-        self.section_h = max(76, int(self.body_px * 1.65))
+        self.mono_f = _font(max(int(self.body_px * 0.9), 56))
+        self.small_f = _font(max(int(self.body_px * 0.7), 40))
+        self.chip_f = _font(max(int(self.body_px * 0.78), 44))
+        self.attn_f = _font(max(int(self.body_px * 0.52), 32))
+        self.icon = max(32, int(self.body_px * 0.48))
+        # Balanced: readable rows without exploding height (Discord long-edge)
+        self.row_h = max(70, int(self.body_px * 1.45))
+        self.header_h = max(58, int(self.body_px * 1.2))
+        self.section_h = max(70, int(self.body_px * 1.4))
         self.scratch = Image.new("RGB", (self.width, max(120, self.body_px * 2)), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
@@ -257,23 +259,28 @@ class _Canvas:
         self,
         rows: list[tuple[str, tuple[int, int, int], str, str]],
         row_h: int = 100,
+        single_line: bool = False,
     ) -> None:
-        rh = max(int(self.body_px * 2.05), int(self.row_h * 1.2))
+        # single_line packs denser while keeping large primary type
+        mult = 1.25 if single_line else 1.7
+        rh = max(int(self.body_px * mult), int(self.row_h * (0.95 if single_line else 1.1)))
         h = max(1, len(rows)) * rh + 10
-        self.elements.append(("mrows", self.y, rows, rh, h))
-        self.y += h + int(self.body_px * 0.45)
+        self.elements.append(("mrows", self.y, rows, rh, h, single_line))
+        self.y += h + int(self.body_px * 0.35)
 
     def multiline_rows_2col(
         self,
         rows: list[tuple[str, tuple[int, int, int], str, str]],
         row_h: int = 100,
         cols: int = 2,
+        single_line: bool = True,
     ) -> None:
-        """Multi-column list pack — keeps width Discord-safe while staying airy."""
+        """Multi-column pack — large type, controlled height for Discord."""
         cols = max(2, min(3, int(cols)))
-        rh = max(int(self.body_px * 2.05), int(self.row_h * 1.2))
+        mult = 1.25 if single_line else 1.7
+        rh = max(int(self.body_px * mult), int(self.row_h * (0.95 if single_line else 1.1)))
         if not rows:
-            self.multiline_rows(rows, row_h=row_h)
+            self.multiline_rows(rows, row_h=row_h, single_line=single_line)
             return
         chunk = (len(rows) + cols - 1) // cols
         columns: list[list] = []
@@ -285,8 +292,8 @@ class _Canvas:
             while len(c) < max_len:
                 c.append(("muted", MUTED, "", ""))
         h = max_len * rh + 10
-        self.elements.append(("mrowsN", self.y, columns, rh, h, cols))
-        self.y += h + int(self.body_px * 0.4)
+        self.elements.append(("mrowsN", self.y, columns, rh, h, cols, single_line))
+        self.y += h + int(self.body_px * 0.35)
 
     def attention_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         """Compact Attention: smaller type, one next-step line each."""
@@ -457,7 +464,9 @@ class _Canvas:
                 draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
                 continue
             if kind == "mrows":
-                _, y, rows, rh, _h = el
+                # el may be (mrows,y,rows,rh,h) or (+ single_line)
+                single_line = bool(el[5]) if len(el) > 5 else False
+                _, y, rows, rh, _h = el[:5]
                 ry = y
                 for idx, (skind, scolor, primary, secondary) in enumerate(rows):
                     bg = ROW_A if idx % 2 == 0 else ROW_B
@@ -471,10 +480,14 @@ class _Canvas:
                         size=self.icon,
                     )
                     max_w = self.content_w - u(110)
-                    p = _fit_cell(draw, primary, self.mono_f, max_w)
-                    s = _fit_cell(draw, secondary, self.small_f, max_w)
-                    draw.text((self.pad + u(80), ry + u(22)), p, font=self.mono_f, fill=TEXT)
-                    draw.text((self.pad + u(80), ry + u(22) + u(58)), s, font=self.small_f, fill=MUTED)
+                    text = primary if single_line or not secondary else primary
+                    p = _fit_cell(draw, text, self.mono_f, max_w)
+                    if single_line or not secondary:
+                        draw.text((self.pad + u(80), ry + (rh - int(self.body_px * 0.9)) // 2), p, font=self.mono_f, fill=TEXT)
+                    else:
+                        s = _fit_cell(draw, secondary, self.small_f, max_w)
+                        draw.text((self.pad + u(80), ry + u(18)), p, font=self.mono_f, fill=TEXT)
+                        draw.text((self.pad + u(80), ry + u(18) + max(36, int(self.body_px * 0.75))), s, font=self.small_f, fill=MUTED)
                     draw.line((self.pad, ry + rh - 1, self.width - self.pad, ry + rh - 1), fill=LINE, width=max(2, u(2)))
                     ry += rh
                 draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
@@ -484,6 +497,7 @@ class _Canvas:
                 _, y, left, right, rh, _h = el
                 columns = [left, right]
                 cols = 2
+                single_line = False
                 gap = u(16)
                 col_w = (self.content_w - gap * (cols - 1)) // cols
                 ry = y
@@ -506,15 +520,14 @@ class _Canvas:
                             )
                             max_w = col_w - u(70)
                             p = _fit_cell(draw, primary, self.mono_f, max_w)
-                            s = _fit_cell(draw, secondary, self.small_f, max_w)
-                            draw.text((x0 + u(44), ry + u(10)), p, font=self.mono_f, fill=TEXT)
-                            draw.text((x0 + u(44), ry + u(10) + max(28, int(self.body_px * 0.7))), s, font=self.small_f, fill=MUTED)
+                            draw.text((x0 + u(44), ry + (rh - int(self.body_px * 0.9)) // 2), p, font=self.mono_f, fill=TEXT)
                         draw.line((x0, ry + rh - 1, x1, ry + rh - 1), fill=LINE, width=max(2, u(2)))
                     ry += rh
                 draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
                 continue
             if kind == "mrowsN":
-                _, y, columns, rh, _h, cols = el
+                single_line = bool(el[6]) if len(el) > 6 else True
+                _, y, columns, rh, _h, cols = el[:6]
                 gap = u(14)
                 col_w = (self.content_w - gap * (cols - 1)) // cols
                 ry = y
@@ -536,15 +549,24 @@ class _Canvas:
                                 size=self.icon,
                             )
                             max_w = col_w - u(64)
-                            p = _fit_cell(draw, primary, self.mono_f, max_w)
-                            s = _fit_cell(draw, secondary, self.small_f, max_w)
-                            draw.text((x0 + u(40), ry + u(14)), p, font=self.mono_f, fill=TEXT)
-                            draw.text(
-                                (x0 + u(40), ry + u(14) + max(32, int(self.body_px * 0.75))),
-                                s,
-                                font=self.small_f,
-                                fill=MUTED,
-                            )
+                            line = primary if single_line or not secondary else primary
+                            p = _fit_cell(draw, line, self.mono_f, max_w)
+                            if single_line or not secondary:
+                                draw.text(
+                                    (x0 + u(40), ry + (rh - int(self.body_px * 0.85)) // 2),
+                                    p,
+                                    font=self.mono_f,
+                                    fill=TEXT,
+                                )
+                            else:
+                                s = _fit_cell(draw, secondary, self.small_f, max_w)
+                                draw.text((x0 + u(40), ry + u(14)), p, font=self.mono_f, fill=TEXT)
+                                draw.text(
+                                    (x0 + u(40), ry + u(14) + max(32, int(self.body_px * 0.75))),
+                                    s,
+                                    font=self.small_f,
+                                    fill=MUTED,
+                                )
                         draw.line((x0, ry + rh - 1, x1, ry + rh - 1), fill=LINE, width=max(2, u(2)))
                     ry += rh
                 draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
@@ -864,14 +886,14 @@ def render_visibility_image(
     for ct in containers:
         sk, sc = _status_color(ct.get("status"))
         tags = f" · {ct.get('tags')}" if ct.get("tags") else ""
-        primary = f"{ct.get('vmid')}  {ct.get('name')}  ·  {ct.get('node')}  ·  {ct.get('status')}"
-        secondary = (
-            f"CPU {ct.get('cpu_human') or '—'}   RAM {ct.get('mem_human') or '—'}   "
-            f"disk {ct.get('disk_human') or '—'}   up {ct.get('uptime_human') or '—'}{tags}"
+        # Single fat line so type can stay large without double-row height
+        primary = (
+            f"{ct.get('vmid')} {ct.get('name')} · {ct.get('node')} · {ct.get('status')} · "
+            f"CPU {ct.get('cpu_human') or '—'} · RAM {ct.get('mem_human') or '—'} · "
+            f"disk {ct.get('disk_human') or '—'} · up {ct.get('uptime_human') or '—'}{tags}"
         )
-        ct_mrows.append((sk, sc, primary, secondary))
-    # Prefer 2-col storage as well for a bit more row height headroom (was 3-col tighter)
-    c.multiline_rows_2col(ct_mrows, row_h=100, cols=2)
+        ct_mrows.append((sk, sc, primary, ""))
+    c.multiline_rows_2col(ct_mrows, cols=2, single_line=True)
     st_statuses = [s.get("status") for s in storage]
     st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
     c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} objects")
@@ -880,12 +902,12 @@ def render_visibility_image(
         sk, sc = _status_color(s.get("status"))
         ratio = s.get("ratio")
         ratio_s = f"{ratio * 100:.1f}%" if isinstance(ratio, float) else "—"
-        primary = f"{s.get('node')}/{s.get('storage')}  ·  {s.get('status')}"
-        secondary = (
-            f"{s.get('type') or '—'}   used {s.get('used_human') or '—'} / {s.get('total_human') or '—'}   fill {ratio_s}"
+        primary = (
+            f"{s.get('node')}/{s.get('storage')} · {s.get('status')} · {s.get('type') or '—'} · "
+            f"{s.get('used_human') or '—'}/{s.get('total_human') or '—'} · fill {ratio_s}"
         )
-        st_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows_2col(st_mrows, row_h=100, cols=2)
+        st_mrows.append((sk, sc, primary, ""))
+    c.multiline_rows_2col(st_mrows, cols=3, single_line=True)
     if warnings:
         steps = _attention_next_steps(warnings)
         c.section_header("Attention", "ATTN", WARN, subtitle="one next step each")

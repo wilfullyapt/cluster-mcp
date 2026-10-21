@@ -49,7 +49,7 @@ def main() -> int:
     parser.add_argument("--pages", action="store_true", help="Write 3 full-width pages instead of one image")
     parser.add_argument("--single", action="store_true", default=True, help="Write one tall single image (default)")
     parser.add_argument("--width", type=int, default=4096, help="Export width in pixels")
-    parser.add_argument("--body-css", type=float, default=20.0, help="Target body CSS-px at 390px phone column")
+    parser.add_argument("--body-css", type=float, default=24.0, help="Target body CSS-px at 390px phone column")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
     use_pages = bool(args.pages) and not args.single
