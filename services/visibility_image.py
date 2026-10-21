@@ -176,29 +176,29 @@ class _Canvas:
         phone_col_css: float = PHONE_COL_CSS,
     ):
         self.width = int(width)
-        # Type density is driven by desired on-screen CSS px, NOT only width ratio.
-        # body_px = target_css * width / phone_col  → stays readable after Discord shrink.
-        self.body_px = max(48, int(round(float(target_body_css) * self.width / float(phone_col_css))))
+        # Desired fit-width CSS size, but CAP body px so a single tall card
+        # does not exceed Discord long-edge limits (which collapses width).
+        raw_body = int(round(float(target_body_css) * self.width / float(phone_col_css)))
+        # ~160px body @ 4096w ≈ 15 CSS-px on phone AND keeps height manageable
+        self.body_px = max(64, min(raw_body, 160))
         # Spacing/layout scale follows body (base design body was 58 at 1600).
         self.scale = self.body_px / 58.0
-        self.pad = max(48, int(self.body_px * 0.4))
+        self.pad = max(40, int(self.body_px * 0.35))
         self.content_w = self.width - self.pad * 2
         self.y = self.pad
         self.elements: list[tuple] = []
-        self.title_f = _font(max(self.body_px + 24, self.u(78)), bold=True)
-        self.head_f = _font(max(self.body_px - 2, self.u(56)), bold=True)
-        self.sub_f = _font(max(int(self.body_px * 0.72), self.u(40)), bold=True)
+        self.title_f = _font(max(self.body_px + 20, 72), bold=True)
+        self.head_f = _font(max(self.body_px - 4, 52), bold=True)
+        self.sub_f = _font(max(int(self.body_px * 0.7), 36), bold=True)
         self.body_f = _font(self.body_px)
-        self.mono_f = _font(max(int(self.body_px * 0.90), self.u(52)))
-        self.small_f = _font(max(int(self.body_px * 0.78), self.u(42)))
-        self.chip_f = _font(max(int(self.body_px * 0.82), self.u(46)))
-        self.icon = max(self.u(32), int(self.body_px * 0.55))
-        # Compact vertical rhythm — single-image must stay short enough that
-        # Discord long-edge downscale does not collapse width.
-        self.row_h = max(self.u(72), int(self.body_px * 1.35))
-        self.header_h = max(self.u(56), int(self.body_px * 1.15))
-        self.section_h = max(self.u(72), int(self.body_px * 1.35))
-        self.scratch = Image.new("RGB", (self.width, max(160, self.u(160))), BG)
+        self.mono_f = _font(max(int(self.body_px * 0.88), 48))
+        self.small_f = _font(max(int(self.body_px * 0.72), 36))
+        self.chip_f = _font(max(int(self.body_px * 0.78), 40))
+        self.icon = max(28, int(self.body_px * 0.5))
+        self.row_h = max(56, int(self.body_px * 1.3))
+        self.header_h = max(48, int(self.body_px * 1.1))
+        self.section_h = max(56, int(self.body_px * 1.25))
+        self.scratch = Image.new("RGB", (self.width, max(120, self.body_px * 2)), BG)
         self.d0 = ImageDraw.Draw(self.scratch)
 
     def u(self, n: float | int) -> int:
@@ -267,19 +267,27 @@ class _Canvas:
         self,
         rows: list[tuple[str, tuple[int, int, int], str, str]],
         row_h: int = 100,
+        cols: int = 2,
     ) -> None:
-        """Two columns — halves list height so single-image width survives Discord."""
-        rh = max(int(self.body_px * 1.55), int(self.row_h * 1.05))
+        """Multi-column list pack — cuts height so single-image width survives Discord."""
+        cols = max(2, min(3, int(cols)))
+        rh = max(int(self.body_px * 1.45), int(self.row_h * 1.0))
         if not rows:
             self.multiline_rows(rows, row_h=row_h)
             return
-        mid = (len(rows) + 1) // 2
-        left, right = rows[:mid], rows[mid:]
-        while len(right) < len(left):
-            right.append(("muted", MUTED, "", ""))
-        h = len(left) * rh + 6
-        self.elements.append(("mrows2", self.y, left, right, rh, h))
-        self.y += h + int(self.body_px * 0.2)
+        # split into N columns round-robin by contiguous chunks
+        chunk = (len(rows) + cols - 1) // cols
+        columns: list[list] = []
+        for i in range(cols):
+            part = rows[i * chunk : (i + 1) * chunk]
+            columns.append(part)
+        max_len = max(len(c) for c in columns)
+        for c in columns:
+            while len(c) < max_len:
+                c.append(("muted", MUTED, "", ""))
+        h = max_len * rh + 6
+        self.elements.append(("mrowsN", self.y, columns, rh, h, cols))
+        self.y += h + int(self.body_px * 0.15)
 
     def bullet_block(self, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         total = self.u(16)
@@ -467,49 +475,72 @@ class _Canvas:
                 draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
                 continue
             if kind == "mrows2":
+                # backward-compat 2-col tuple shape
                 _, y, left, right, rh, _h = el
-                gap = u(20)
-                col_w = (self.content_w - gap) // 2
+                columns = [left, right]
+                cols = 2
+                gap = u(16)
+                col_w = (self.content_w - gap * (cols - 1)) // cols
                 ry = y
-                for idx_row, (skind, scolor, primary, secondary) in enumerate(left):
+                n = len(left)
+                for idx_row in range(n):
                     bg = ROW_A if idx_row % 2 == 0 else ROW_B
-                    x0 = self.pad
-                    x1 = self.pad + col_w
-                    draw.rectangle((x0, ry, x1, ry + rh), fill=bg)
-                    if primary:
-                        _draw_status_icon(
-                            draw,
-                            x0 + u(12),
-                            ry + (rh - self.icon) // 2,
-                            skind,
-                            scolor,
-                            size=self.icon,
-                        )
-                        max_w = col_w - u(80)
-                        p = _fit_cell(draw, primary, self.mono_f, max_w)
-                        s = _fit_cell(draw, secondary, self.small_f, max_w)
-                        draw.text((x0 + u(52), ry + u(12)), p, font=self.mono_f, fill=TEXT)
-                        draw.text((x0 + u(52), ry + u(12) + u(40)), s, font=self.small_f, fill=MUTED)
-                    draw.line((x0, ry + rh - 1, x1, ry + rh - 1), fill=LINE, width=max(2, u(2)))
-                    sk2, sc2, p2, s2 = right[idx_row]
-                    x2 = self.pad + col_w + gap
-                    x3 = self.width - self.pad
-                    draw.rectangle((x2, ry, x3, ry + rh), fill=bg)
-                    if p2:
-                        _draw_status_icon(
-                            draw,
-                            x2 + u(12),
-                            ry + (rh - self.icon) // 2,
-                            sk2,
-                            sc2,
-                            size=self.icon,
-                        )
-                        max_w = col_w - u(80)
-                        pp = _fit_cell(draw, p2, self.mono_f, max_w)
-                        ss = _fit_cell(draw, s2, self.small_f, max_w)
-                        draw.text((x2 + u(52), ry + u(12)), pp, font=self.mono_f, fill=TEXT)
-                        draw.text((x2 + u(52), ry + u(12) + u(40)), ss, font=self.small_f, fill=MUTED)
-                    draw.line((x2, ry + rh - 1, x3, ry + rh - 1), fill=LINE, width=max(2, u(2)))
+                    for ci, col in enumerate(columns):
+                        skind, scolor, primary, secondary = col[idx_row]
+                        x0 = self.pad + ci * (col_w + gap)
+                        x1 = x0 + col_w
+                        draw.rectangle((x0, ry, x1, ry + rh), fill=bg)
+                        if primary:
+                            _draw_status_icon(
+                                draw,
+                                x0 + u(10),
+                                ry + (rh - self.icon) // 2,
+                                skind,
+                                scolor,
+                                size=self.icon,
+                            )
+                            max_w = col_w - u(70)
+                            p = _fit_cell(draw, primary, self.mono_f, max_w)
+                            s = _fit_cell(draw, secondary, self.small_f, max_w)
+                            draw.text((x0 + u(44), ry + u(10)), p, font=self.mono_f, fill=TEXT)
+                            draw.text((x0 + u(44), ry + u(10) + max(28, int(self.body_px * 0.7))), s, font=self.small_f, fill=MUTED)
+                        draw.line((x0, ry + rh - 1, x1, ry + rh - 1), fill=LINE, width=max(2, u(2)))
+                    ry += rh
+                draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
+                continue
+            if kind == "mrowsN":
+                _, y, columns, rh, _h, cols = el
+                gap = u(14)
+                col_w = (self.content_w - gap * (cols - 1)) // cols
+                ry = y
+                n = len(columns[0])
+                for idx_row in range(n):
+                    bg = ROW_A if idx_row % 2 == 0 else ROW_B
+                    for ci, col in enumerate(columns):
+                        skind, scolor, primary, secondary = col[idx_row]
+                        x0 = self.pad + ci * (col_w + gap)
+                        x1 = x0 + col_w
+                        draw.rectangle((x0, ry, x1, ry + rh), fill=bg)
+                        if primary:
+                            _draw_status_icon(
+                                draw,
+                                x0 + u(8),
+                                ry + (rh - self.icon) // 2,
+                                skind,
+                                scolor,
+                                size=self.icon,
+                            )
+                            max_w = col_w - u(64)
+                            p = _fit_cell(draw, primary, self.mono_f, max_w)
+                            s = _fit_cell(draw, secondary, self.small_f, max_w)
+                            draw.text((x0 + u(40), ry + u(8)), p, font=self.mono_f, fill=TEXT)
+                            draw.text(
+                                (x0 + u(40), ry + u(8) + max(26, int(self.body_px * 0.65))),
+                                s,
+                                font=self.small_f,
+                                fill=MUTED,
+                            )
+                        draw.line((x0, ry + rh - 1, x1, ry + rh - 1), fill=LINE, width=max(2, u(2)))
                     ry += rh
                 draw.rectangle((self.pad, y, self.width - self.pad, ry), outline=LINE, width=max(2, u(2)))
                 continue
@@ -799,7 +830,7 @@ def render_visibility_image(
             f"disk {ct.get('disk_human') or '—'}   up {ct.get('uptime_human') or '—'}{tags}"
         )
         ct_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows_2col(ct_mrows, row_h=100)
+    c.multiline_rows_2col(ct_mrows, row_h=100, cols=2)
     st_statuses = [s.get("status") for s in storage]
     st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
     c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} objects")
@@ -813,7 +844,7 @@ def render_visibility_image(
             f"{s.get('type') or '—'}   used {s.get('used_human') or '—'} / {s.get('total_human') or '—'}   fill {ratio_s}"
         )
         st_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows_2col(st_mrows, row_h=100)
+    c.multiline_rows_2col(st_mrows, row_h=100, cols=3)
     if warnings:
         c.section_header("Attention", "ATTN", WARN, subtitle=f"{len(warnings)} item(s)")
         c.bullet_block([(str(w), WARN) for w in warnings])
