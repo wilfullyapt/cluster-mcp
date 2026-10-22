@@ -36,7 +36,7 @@ DEFAULT_WIDTH = 4096
 PHONE_COL_CSS = 390
 # Fit-width target on ~390px Discord column. Do not cap body so low that text
 # is unreadable after Discord shows the attachment full-bleed.
-TARGET_BODY_CSS_PX = 24
+TARGET_BODY_CSS_PX = 16
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -183,7 +183,7 @@ class _Canvas:
         raw_body = int(round(float(target_body_css) * self.width / float(phone_col_css)))
         # Soft ceiling: large enough to read, not so large single-card height
         # blows Discord long-edge (which shrinks the whole attachment).
-        self.body_px = max(72, min(raw_body, 200))
+        self.body_px = max(56, min(raw_body, 140))
         self.scale = self.body_px / 58.0
         self.pad = max(32, int(self.body_px * 0.25))
         self.content_w = self.width - self.pad * 2
