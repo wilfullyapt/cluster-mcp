@@ -651,7 +651,15 @@ def _section_status_from_rows(statuses: list[Any]) -> tuple[str, tuple[int, int,
     return "—", MUTED
 
 
-def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, include_footer: bool = True) -> None:
+def _fill_overview(
+    c: _Canvas,
+    report: dict[str, Any],
+    page_label: str,
+    *,
+    include_footer: bool = True,
+    include_ceph: bool = True,
+    include_attention: bool = False,
+) -> None:
     overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
     label, color = _traffic(overall)
     cluster = report.get("cluster") or {}
@@ -725,6 +733,20 @@ def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, inclu
         rows=node_rows,
     )
 
+    if include_ceph:
+        _append_ceph(c, report)
+
+    if include_attention:
+        _append_attention(c, report)
+
+    if include_footer:
+        c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · {page_label}")
+
+
+def _append_ceph(c: _Canvas, report: dict[str, Any]) -> None:
+    ceph = report.get("ceph") or {}
+    osd_summary = ceph.get("osd_summary") or {}
+    osds = list(ceph.get("osds") or [])
     health = ceph.get("health_status") or (ceph.get("health") or {}).get("status") or "—"
     hk, hc = _status_color(health)
     sec_l, sec_c = ("WARN", WARN) if osd_summary.get("detail_available") is False else (
@@ -768,52 +790,43 @@ def _fill_overview(c: _Canvas, report: dict[str, Any], page_label: str, *, inclu
                     f"source={osd_summary.get('source') or '—'} · not fabricated",
                 )
             ],
-            row_h=100,
+            single_line=False,
         )
-    if include_footer:
-        c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · {page_label}")
+    c.gap(24)
 
 
-def _fill_containers(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
-    overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
-    label, color = _traffic(overall)
+def _append_attention(c: _Canvas, report: dict[str, Any]) -> None:
+    warnings = list(report.get("warnings") or [])
+    if warnings:
+        steps = _attention_next_steps(warnings)
+        c.section_header("Attention", "ATTN", WARN, subtitle="one next step each")
+        c.attention_block([(s, WARN) for s in steps])
+    else:
+        c.section_header("Attention", "OK", OK, subtitle="No open next steps")
+        c.attention_block([("Next: none — cluster probes clean", OK)])
+
+
+def _append_containers(c: _Canvas, report: dict[str, Any]) -> None:
     containers = list(report.get("containers") or [])
-    c.title_block(
-        title="ClusterMCP  ·  Containers",
-        meta=f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  {c.width}px  ·  body {c.body_px}px  ·  {page_label}",
-        overall_label=label,
-        overall_color=color,
-    )
-    c.gap(16)
     ct_statuses = [ct.get("status") for ct in containers]
     ct_l, ct_c = _section_status_from_rows(ct_statuses)
-    c.section_header("Containers", ct_l, ct_c, subtitle=f"{len(containers)} LXC from cluster/resources")
+    c.section_header("Containers", ct_l, ct_c, subtitle=f"{len(containers)} LXC")
     ct_mrows: list[tuple[str, tuple[int, int, int], str, str]] = []
     for ct in containers:
         sk, sc = _status_color(ct.get("status"))
         tags = f" · {ct.get('tags')}" if ct.get("tags") else ""
-        primary = f"{ct.get('vmid')}  {ct.get('name')}  ·  {ct.get('node')}  ·  {ct.get('status')}"
-        secondary = (
-            f"CPU {ct.get('cpu_human') or '—'}   RAM {ct.get('mem_human') or '—'}   "
-            f"disk {ct.get('disk_human') or '—'}   up {ct.get('uptime_human') or '—'}{tags}"
+        primary = (
+            f"{ct.get('vmid')} {ct.get('name')} · {ct.get('node')} · {ct.get('status')} · "
+            f"CPU {ct.get('cpu_human') or '—'} · RAM {ct.get('mem_human') or '—'} · "
+            f"disk {ct.get('disk_human') or '—'} · up {ct.get('uptime_human') or '—'}{tags}"
         )
-        ct_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows(ct_mrows, row_h=150)
-    c.footer(f"Stronghold · live probes · {c.width}px · body {c.body_px}px · {page_label}")
+        ct_mrows.append((sk, sc, primary, ""))
+    c.multiline_rows_2col(ct_mrows, cols=2, single_line=True)
+    c.gap(24)
 
 
-def _fill_storage(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
-    overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
-    label, color = _traffic(overall)
+def _append_storage(c: _Canvas, report: dict[str, Any]) -> None:
     storage = list(report.get("storage") or [])
-    warnings = list(report.get("warnings") or [])
-    c.title_block(
-        title="ClusterMCP  ·  Storage + Attention",
-        meta=f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  {c.width}px  ·  body {c.body_px}px  ·  {page_label}",
-        overall_label=label,
-        overall_color=color,
-    )
-    c.gap(16)
     st_statuses = [s.get("status") for s in storage]
     st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
     c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} objects")
@@ -822,21 +835,12 @@ def _fill_storage(c: _Canvas, report: dict[str, Any], page_label: str) -> None:
         sk, sc = _status_color(s.get("status"))
         ratio = s.get("ratio")
         ratio_s = f"{ratio * 100:.1f}%" if isinstance(ratio, float) else "—"
-        primary = f"{s.get('node')}/{s.get('storage')}  ·  {s.get('status')}"
-        secondary = (
-            f"{s.get('type') or '—'}   used {s.get('used_human') or '—'} / {s.get('total_human') or '—'}   fill {ratio_s}"
+        primary = (
+            f"{s.get('node')}/{s.get('storage')} · {s.get('status')} · {s.get('type') or '—'} · "
+            f"{s.get('used_human') or '—'}/{s.get('total_human') or '—'} · fill {ratio_s}"
         )
-        st_mrows.append((sk, sc, primary, secondary))
-    c.multiline_rows(st_mrows, row_h=100)
-
-    if warnings:
-        steps = _attention_next_steps(warnings)
-        c.section_header("Attention", "ATTN", WARN, subtitle="one next step each")
-        c.attention_block([(s, WARN) for s in steps])
-    else:
-        c.section_header("Attention", "OK", OK, subtitle="No open next steps")
-        c.attention_block([("Next: none — cluster probes clean", OK)])
-    c.footer(f"Stronghold · live probes · {c.width}px · body {c.body_px}px · {page_label}")
+        st_mrows.append((sk, sc, primary, ""))
+    c.multiline_rows_2col(st_mrows, cols=2, single_line=True)
 
 
 def _png_bytes(img: Image.Image) -> bytes:
@@ -850,25 +854,43 @@ def render_visibility_pages(
     width: int = DEFAULT_WIDTH,
     target_body_css: float = TARGET_BODY_CSS_PX,
 ) -> list[tuple[str, bytes]]:
-    """Return multiple full-width PNG pages (overview, containers, storage).
+    """Two-page Discord-friendly report (Wil default).
 
-    Multi-page avoids Discord crushing one ultra-tall strip; larger target_body_css
-    makes fit-width text actually bigger (not just a proportional 2× of the old card).
+    Page 1: Summary + Nodes + Attention
+    Page 2: Ceph + Containers + Storage
     """
     width = max(BASE_WIDTH, int(width))
     pages: list[tuple[str, bytes]] = []
 
     c1 = _Canvas(width=width, target_body_css=target_body_css)
-    _fill_overview(c1, report, "page 1/3 overview")
-    pages.append(("01-overview", _png_bytes(c1.render())))
+    _fill_overview(
+        c1,
+        report,
+        "1/2 · summary · nodes · attention",
+        include_footer=True,
+        include_ceph=False,
+        include_attention=True,
+    )
+    pages.append(("01-summary-nodes-attention", _png_bytes(c1.render())))
 
+    overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
+    label, color = _traffic(overall)
     c2 = _Canvas(width=width, target_body_css=target_body_css)
-    _fill_containers(c2, report, "page 2/3 containers")
-    pages.append(("02-containers", _png_bytes(c2.render())))
-
-    c3 = _Canvas(width=width, target_body_css=target_body_css)
-    _fill_storage(c3, report, "page 3/3 storage")
-    pages.append(("03-storage", _png_bytes(c3.render())))
+    c2.title_block(
+        title="ClusterMCP  ·  Ceph · CTs · Storage",
+        meta=(
+            f"{report.get('generated_at', '—')}  ·  live_probes_only  ·  "
+            f"{width}px  ·  body {c2.body_px}px  ·  2/2"
+        ),
+        overall_label=label,
+        overall_color=color,
+    )
+    c2.gap(28)
+    _append_ceph(c2, report)
+    _append_containers(c2, report)
+    _append_storage(c2, report)
+    c2.footer(f"Stronghold · live probes · {width}px · body {c2.body_px}px · 2/2")
+    pages.append(("02-ceph-containers-storage", _png_bytes(c2.render())))
 
     return pages
 
@@ -878,48 +900,19 @@ def render_visibility_image(
     width: int = DEFAULT_WIDTH,
     target_body_css: float = TARGET_BODY_CSS_PX,
 ) -> bytes:
-    """Single full report PNG (default deliverable)."""
+    """Single full report PNG (optional; prefer two-page default)."""
     width = max(BASE_WIDTH, int(width))
     c = _Canvas(width=width, target_body_css=target_body_css)
-    _fill_overview(c, report, "full report", include_footer=False)
-    containers = list(report.get("containers") or [])
-    storage = list(report.get("storage") or [])
-    warnings = list(report.get("warnings") or [])
-    ct_statuses = [ct.get("status") for ct in containers]
-    ct_l, ct_c = _section_status_from_rows(ct_statuses)
-    c.section_header("Containers", ct_l, ct_c, subtitle=f"{len(containers)} LXC")
-    ct_mrows = []
-    for ct in containers:
-        sk, sc = _status_color(ct.get("status"))
-        tags = f" · {ct.get('tags')}" if ct.get("tags") else ""
-        # Single fat line so type can stay large without double-row height
-        primary = (
-            f"{ct.get('vmid')} {ct.get('name')} · {ct.get('node')} · {ct.get('status')} · "
-            f"CPU {ct.get('cpu_human') or '—'} · RAM {ct.get('mem_human') or '—'} · "
-            f"disk {ct.get('disk_human') or '—'} · up {ct.get('uptime_human') or '—'}{tags}"
-        )
-        ct_mrows.append((sk, sc, primary, ""))
-    c.multiline_rows_2col(ct_mrows, cols=2, single_line=True)
-    st_statuses = [s.get("status") for s in storage]
-    st_l, st_c = _section_status_from_rows(st_statuses if st_statuses else ["unknown"])
-    c.section_header("Storage", st_l, st_c, subtitle=f"{len(storage)} objects")
-    st_mrows = []
-    for s in storage:
-        sk, sc = _status_color(s.get("status"))
-        ratio = s.get("ratio")
-        ratio_s = f"{ratio * 100:.1f}%" if isinstance(ratio, float) else "—"
-        primary = (
-            f"{s.get('node')}/{s.get('storage')} · {s.get('status')} · {s.get('type') or '—'} · "
-            f"{s.get('used_human') or '—'}/{s.get('total_human') or '—'} · fill {ratio_s}"
-        )
-        st_mrows.append((sk, sc, primary, ""))
-    c.multiline_rows_2col(st_mrows, cols=2, single_line=True)
-    if warnings:
-        steps = _attention_next_steps(warnings)
-        c.section_header("Attention", "ATTN", WARN, subtitle="one next step each")
-        c.attention_block([(s, WARN) for s in steps])
-    else:
-        c.section_header("Attention", "OK", OK, subtitle="No open next steps")
-        c.attention_block([("Next: none — cluster probes clean", OK)])
+    _fill_overview(
+        c,
+        report,
+        "full report",
+        include_footer=False,
+        include_ceph=True,
+        include_attention=False,
+    )
+    _append_containers(c, report)
+    _append_storage(c, report)
+    _append_attention(c, report)
     c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · single image")
     return _png_bytes(c.render())

@@ -46,16 +46,13 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://192.168.0.233:8000", help="ClusterMCP base URL")
     parser.add_argument("--out", required=True, help="Output PNG path")
     parser.add_argument("--json-out", default="", help="Optional JSON report path")
-    parser.add_argument("--pages", action="store_true", help="Write 3 full-width pages instead of one image")
-    parser.add_argument("--single", action="store_true", default=True, help="Write one tall single image (default)")
+    parser.add_argument("--pages", action="store_true", default=True, help="Write 2-page report (default)")
+    parser.add_argument("--single", action="store_true", help="Write one tall single image instead of 2 pages")
     parser.add_argument("--width", type=int, default=4096, help="Export width in pixels")
     parser.add_argument("--body-css", type=float, default=24.0, help="Target body CSS-px at 390px phone column")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
-    use_pages = bool(args.pages) and not args.single
-    # argparse can't easily do pages XOR single; prefer --pages when explicitly set
-    if args.pages:
-        use_pages = True
+    use_pages = not bool(args.single)
 
     probe_errors: dict[str, str] = {}
 
