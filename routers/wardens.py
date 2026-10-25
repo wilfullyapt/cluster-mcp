@@ -246,3 +246,43 @@ def list_reports() -> ActionResponse:
         success=True,
         data={"nodes": get_store().list_report_nodes()},
     )
+
+
+@router.post("/nodes/{node}/collect", response_model=ActionResponse)
+def collect_from_node(node: str) -> ActionResponse:
+    """MCP-initiated collect: pull report through the on-node Warden bridge.
+
+    The bridge does not call ClusterMCP; ClusterMCP SSHs in with the enrolled
+    key and runs the collector (stdout JSON).
+    """
+    try:
+        node = _safe_node_name(node)
+    except ValueError as exc:
+        return ActionResponse(success=False, error=str(exc))
+
+    from services.warden_bridge import BridgeError, collect_node
+
+    try:
+        report = collect_node(node)
+    except BridgeError as exc:
+        logger.warning("Warden collect failed", node=node, error=str(exc))
+        return ActionResponse(success=False, error=str(exc))
+    return ActionResponse(success=True, data=report)
+
+
+@router.get("/enrolled", response_model=ActionResponse)
+def list_enrolled_nodes() -> ActionResponse:
+    """List nodes enrolled via `cluster setup` (inventory, not push-register)."""
+    from services.node_inventory import get_inventory
+
+    rows = [
+        {
+            "node": n.node,
+            "host": n.host,
+            "warden_version": n.warden_version,
+            "collector_caps": n.collector_caps,
+            "auth_method": n.auth_method,
+        }
+        for n in get_inventory().list_nodes()
+    ]
+    return ActionResponse(success=True, data={"nodes": rows})

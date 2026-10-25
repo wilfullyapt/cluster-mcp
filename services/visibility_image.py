@@ -665,10 +665,8 @@ def _fill_overview(
     cluster = report.get("cluster") or {}
     summary = report.get("summary") or {}
     ceph = report.get("ceph") or {}
-    osd_summary = ceph.get("osd_summary") or {}
     mcp = report.get("mcp") or {}
     nodes = list(report.get("node_inventory") or [])
-    osds = list(ceph.get("osds") or [])
     width = c.width
 
     c.title_block(

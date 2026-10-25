@@ -1,77 +1,83 @@
-# Wardens Capabilities (Collector + Runner)
+# Wardens Capabilities (Collector bridge + Runner)
 
-**Purpose:** Define what each Warden can see and do so ClusterMCP can discover, gate, and dispatch.
+**Purpose:** Define what each Warden bridge can see/do so ClusterMCP can enroll, gate, and dispatch.
 
-**Node agent model:** C binaries installed on each **Proxmox host** (systemd). Not a Proxmox VE UI add-on / marketplace package — a Stronghold node agent.
+**Control plane:** ClusterMCP owns setup, scheduling, and initiation.  
+**Node agent:** C bridge binary installed by `cluster setup`. Not a PVE UI add-on.
 
-## Shipped in this branch (MVP)
+## Architecture (current)
+
+```text
+operator:  cluster setup --ip <node>   # password ephemeral
+ClusterMCP  --SSH key-->  wardens-collector (stdout JSON)
+ClusterMCP  schedules intervals / runs; bridge never calls MCP
+```
+
+## Shipped
+
+### CLI (`cluster`)
+
+| Command | Notes |
+|---------|--------|
+| `cluster setup --ip <addr>` | Password prompt/stdin; install bridge; enroll node |
+| `cluster nodes` | List enrolled inventory |
+| `cluster collect --node <name>` | MCP-initiated pull via bridge |
 
 ### ClusterMCP HTTP API
 
 | Method | Path | Notes |
 |--------|------|--------|
-| `POST` | `/wardens/register` | Capability registration (JSON file store) |
-| `GET` | `/wardens/nodes` | Map of node → high-level caps |
-| `GET` | `/wardens/nodes/{node}/capabilities` | Full caps document |
-| `GET` | `/wardens/capabilities` | Union of all collector/runner cap strings |
-| `POST` | `/wardens/collector/report` | Validated collector report (`CollectorReport`) |
+| `GET` | `/wardens/enrolled` | Inventory from `cluster setup` |
+| `POST` | `/wardens/nodes/{node}/collect` | MCP-initiated collect over SSH bridge |
 | `GET` | `/wardens/nodes/{node}/report` | Last stored report |
-| `GET` | `/wardens/reports` | Nodes that have a report |
+| `GET` | `/wardens/reports` | Nodes with a stored report |
+| `GET` | `/wardens/nodes` | Capability summaries (mirrored on enroll) |
+| `GET` | `/wardens/nodes/{node}/capabilities` | Full caps document |
+| `GET` | `/wardens/capabilities` | Union of cap strings |
 
-Persistence: `WARDENS_DATA_DIR` (default `/var/lib/clustermcp/wardens`) — `capabilities/*.json`, `reports/*.json`.
+**Deprecated (push model):** `POST /wardens/register`, `POST /wardens/collector/report` remain for transition/tests but are **not** the setup path. Bridges do not call them.
 
-### Collector binary (`wardens/build/collector`)
+Persistence: `WARDENS_DATA_DIR` (default `/var/lib/clustermcp/wardens`) — `nodes/`, `ssh/`, `capabilities/`, `reports/`. **Passwords never stored.**
+
+### Collector bridge (`wardens/build/collector`)
 
 | Capability | Status | Behavior |
 |------------|--------|----------|
 | `lxc:full` | **MVP** | Enumerate `/etc/pve/lxc/*.conf` (up to 64) |
 | `permissions:audit` | **MVP** | `stat` + `access` on `/etc/pve/lxc` |
-| Register + report push | **MVP** | Env: `CLUSTERMCP_URL`, `WARDEN_NODE`, optional `MCP_API_KEY` |
+| stdout JSON report | **MVP** | Env: `WARDEN_NODE`, optional `WARDEN_VERSION` |
+| Outbound to MCP | **Removed** | Bridge has no MCP URL |
 
-### Runner binary (`wardens/build/runner`)
+### Runner binary
 
 | Status | Notes |
 |--------|--------|
-| **Skeleton only** | No signing, seccomp, or job execution. **Do not enable in production.** |
+| **Skeleton only** | No signing/seccomp/jobs. **Do not enable.** |
 
 ## Target state (not shipped)
 
-### Future collector capabilities
+| Item | Description |
+|------|-------------|
+| MCP-side interval scheduler | systemd timer / internal job on MCP host |
+| `cephfs:mapping` / `docker:status` | Extra bridge collect slices |
+| Signed runner allow-list | MCP-initiated mutate jobs |
+| mTLS or SSH CA | Stronger node auth than per-node keys |
 
-| Capability | Description |
-|------------|-------------|
-| `cephfs:mapping` | Subvolumes, host ownership, quotas |
-| `docker:status` | Compose projects on known paths |
-| `troubleshoot:bundle` | Aggregated diagnostics |
-
-### Future runner allow-list (signed jobs only)
-
-| allowlist_key | Description |
-|---------------|-------------|
-| `service:restart` | Restart allow-listed systemd units |
-| `logs:collect` | Scoped journal/log collection |
-| `compose:restart` | Scoped compose restart |
-| `config:safe-read` | Read approved config paths |
-| `diagnostics:run` | Pre-approved diagnostic commands |
-
-### Capability report format (register body — shipped)
+## Enrollment record (inventory — shipped)
 
 ```json
 {
   "node": "pvenodeone",
-  "warden_version": "0.2.0",
+  "host": "192.168.0.10",
+  "ssh_user": "root",
+  "ssh_port": 22,
+  "auth_method": "ssh_key",
+  "key_name": "warden-pvenodeone",
+  "collector_path": "/opt/wardens/bin/wardens-collector",
+  "warden_version": "0.3.0",
   "collector_caps": ["lxc:full", "permissions:audit"],
-  "runner_allowlist": [],
-  "seccomp_profile": "none",
-  "resource_limits": {"max_mem_mb": 256}
+  "runner_allowlist": []
 }
 ```
 
-## Cross-cutting (planned)
-
-- `self:update` — signed binary self-update
-- `metrics:export` — Prometheus
-- `audit:stream` — job/visibility audit feed
-- mTLS between Warden and ClusterMCP
-
-See `INSTALL-NODE.md` for lab install and `../IMPLEMENTATION.md` for phasing.
+See `INSTALL-NODE.md` and `../IMPLEMENTATION.md`.

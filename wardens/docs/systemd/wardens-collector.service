@@ -1,5 +1,12 @@
+# DEPRECATED — node-side push timer
+#
+# Control plane owns intervals. Do not enable these units on new enrollments.
+# Kept only for reference during migration off the push collector.
+# Prefer: MCP host cron/systemd → `cluster collect --node <name>`
+#      or POST /wardens/nodes/{node}/collect
+
 [Unit]
-Description=Wardens collector (push visibility to ClusterMCP)
+Description=DEPRECATED Wardens collector oneshot (push model — do not enable)
 After=network-online.target
 Wants=network-online.target
 
@@ -8,7 +15,6 @@ Type=oneshot
 EnvironmentFile=-/etc/wardens/collector.env
 ExecStart=/opt/wardens/bin/wardens-collector
 Nice=10
-# Read-only intent: collector should not need write to guest storage
 ProtectSystem=full
 ProtectHome=true
 PrivateTmp=true

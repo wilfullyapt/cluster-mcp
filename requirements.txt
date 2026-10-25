@@ -13,4 +13,6 @@ pytest-cov
 ruff==0.6.9
 proxmox-sdk
 Pillow>=10.0.0
+paramiko>=3.4.0
+cryptography>=42.0.0
 # python3-rados (system package on Ceph nodes / LXC)

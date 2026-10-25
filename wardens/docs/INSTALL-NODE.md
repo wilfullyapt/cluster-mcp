@@ -1,75 +1,78 @@
-# Install Wardens collector on a Proxmox node (lab)
+# Install Wardens via ClusterMCP (`cluster setup`)
 
-**What this is:** a host-local **node agent** (systemd + binary), not a PVE UI add-on.
+**Model:** ClusterMCP is the control plane. Wardens are a **bridge binary** on each
+Proxmox node. The bridge does **not** know where MCP lives and never calls home.
+Interval collection and runs are initiated by MCP.
 
-**Who:** Hephaestus builds artifacts; **Lamassu** deploys/operates on Stronghold nodes.
+**Who:** Hephaestus builds artifacts; operators (Lamassu) run `cluster setup` from
+the MCP host (or any host with the enrolled key store).
 
 ## Prerequisites
 
-- Proxmox VE host (reads `/etc/pve/lxc`)
-- ClusterMCP reachable on the LAN (e.g. LXC running uvicorn on port 8000)
-- Build host with: `gcc`, `make`, `libcurl` dev headers  
-  Debian/PVE: `apt install build-essential libcurl4-openssl-dev`
+- ClusterMCP checkout with deps (`pip install -r requirements.txt`)
+- Built collector: `make -C wardens/build collector`
+- Network path from MCP host → node SSH (port 22)
+- One-time root (or sudo-capable) password on the node — **never stored**
 
-## Build (from ClusterMCP checkout)
-
-```bash
-cd /path/to/clustermcp/wardens/build
-make clean && make collector
-# optional static musl:
-# make clean && make STATIC=1 CC=musl-gcc collector
-ls -la collector
-```
-
-## Install on node
+## Build bridge binary
 
 ```bash
-install -d /opt/wardens/bin /etc/wardens
-install -m 755 collector /opt/wardens/bin/wardens-collector
+cd /path/to/clustermcp
+make -C wardens/build clean && make -C wardens/build collector
+export WARDENS_COLLECTOR_BIN="$PWD/wardens/build/collector"   # optional if default path
 ```
 
-### Environment file `/etc/wardens/collector.env`
+## Enroll a node
+
+On the MCP host:
 
 ```bash
-WARDEN_NODE=pvenodeone
-CLUSTERMCP_URL=http://192.168.0.233:8000
-# MCP_API_KEY=...   # if ClusterMCP has MCP_API_KEY set
-WARDEN_VERSION=0.2.0
+# Interactive password prompt (not echoed, not saved)
+cluster setup --ip 192.168.0.10
+
+# Or pipe once:
+printf '%s\n' "$NODE_PASSWORD" | cluster setup --ip 192.168.0.10 --password-stdin
+# or: CLUSTER_SETUP_PASSWORD=... cluster setup --ip 192.168.0.10
+# (env var is popped during setup; still never written to inventory)
 ```
 
-### systemd oneshot + timer (recommended for MVP)
+What setup does:
 
-Unit: `references` in-repo → copy from checkout:
+1. SSH with the provided password (ephemeral)
+2. Checks host is Proxmox (`/etc/pve`, `pveversion`)
+3. Generates an ed25519 key pair under `$WARDENS_DATA_DIR/ssh/` (default `/var/lib/clustermcp/wardens/ssh/`)
+4. Installs the public key on the node
+5. Installs `/opt/wardens/bin/wardens-collector` + `/etc/wardens/collector.env` (**node name only** — no MCP URL)
+6. Writes enrollment record under `$WARDENS_DATA_DIR/nodes/` (**no password field**)
 
-- `wardens/docs/systemd/wardens-collector.service`
-- `wardens/docs/systemd/wardens-collector.timer`
+## MCP-initiated collect
 
 ```bash
-cp wardens/docs/systemd/wardens-collector.service /etc/systemd/system/
-cp wardens/docs/systemd/wardens-collector.timer /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now wardens-collector.timer
-systemctl start wardens-collector.service   # run once now
-journalctl -u wardens-collector -n 50 --no-pager
+cluster collect --node pvenodeone
+# or HTTP:
+curl -sS -X POST http://127.0.0.1:8000/wardens/nodes/pvenodeone/collect | jq .
+curl -sS http://127.0.0.1:8000/wardens/nodes/pvenodeone/report | jq .
+curl -sS http://127.0.0.1:8000/wardens/enrolled | jq .
 ```
 
-## Verify against ClusterMCP
+Scheduling (interval) belongs on the MCP side (cron / systemd timer calling
+`cluster collect` or `POST .../collect`) — **not** a timer on the node.
 
-```bash
-curl -sS "$CLUSTERMCP_URL/wardens/nodes" | jq .
-curl -sS "$CLUSTERMCP_URL/wardens/nodes/${WARDEN_NODE}/report" | jq .
-curl -sS "$CLUSTERMCP_URL/wardens/reports" | jq .
-```
+## Bridge contract
+
+- Env: `WARDEN_NODE` (required), `WARDEN_VERSION` (optional)
+- stdout: one `CollectorReport` JSON document
+- stderr: diagnostics
+- No outbound HTTP
 
 ## Runner
 
-Do **not** install/enable `runner` for lab MVP. It is a non-functional skeleton.
+Do **not** enable runner. Skeleton only.
 
-## Rollback
+## Rollback on a node
 
 ```bash
-systemctl disable --now wardens-collector.timer wardens-collector.service
-rm -f /etc/systemd/system/wardens-collector.*
-systemctl daemon-reload
+rm -f /root/.ssh/authorized_keys   # only remove the clustermcp-* line in practice
 rm -rf /opt/wardens /etc/wardens
+# On MCP: delete $WARDENS_DATA_DIR/nodes/<node>.json and ssh/warden-<node>*
 ```

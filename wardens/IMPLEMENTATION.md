@@ -1,58 +1,72 @@
-# Wardens Implementation Plan (ClusterMCP Visibility Upgrade)
+# Wardens Implementation Plan (ClusterMCP control plane)
 
-**Date**: 2026-09-29 (MVP progress 2026-10-21)  
-**Status**: Phase 0 complete; **Phase 1 collector MVP** in progress for home-lab dogfood.  
-**SoR (near-term)**: `/root/seneschal/repos/clustermcp/wardens/` (nested under ClusterMCP; GitHub `wilfullyapt/cluster-mcp`)  
-**Central integration**: ClusterMCP Python FastAPI (`routers/wardens.py`)  
+**Date**: 2026-09-29 (control-plane pivot 2026-10-25)  
+**Status**: Push-collector superseded; **MCP-initiated bridge** is the setup path.  
+**SoR (near-term)**: `/root/seneschal/repos/clustermcp/wardens/` (GitHub `wilfullyapt/cluster-mcp`)  
+**Central integration**: ClusterMCP Python (`cluster` CLI, `services/warden_*.py`, `routers/wardens.py`)  
 **ADR**: `reliquary/domains/shipyard/adr/0002-wardens-vs-clustermcp.md`
 
 ## Goals
 
-Per-node **C binaries** on each Proxmox host give ClusterMCP host-local visibility (LXC conf, permissions, later CephFS/Docker) and eventually **limited** signed mutate via runner — without interactive SSH for routine status.
+Per-node **C bridge** on each Proxmox host. ClusterMCP:
 
-**Not** a Proxmox VE marketplace/UI add-on. Packaging may later be a `.deb`; runtime is systemd node agent.
+1. Enrolls nodes via `cluster setup` (password once, never stored)
+2. Holds SSH keys + inventory under `WARDENS_DATA_DIR`
+3. Initiates all collect/run traffic
+4. Owns interval scheduling
+
+The bridge does **not** know MCP’s URL and never opens outbound connections to MCP.
+
+**Not** a Proxmox VE marketplace/UI add-on.
 
 ## Components
 
-- **collector/**: Read-oriented C binary. Pushes register + report to ClusterMCP.
-- **runner/**: Restricted execution C binary (signed-job only) — **skeleton only in MVP**.
-- **shared/**: C structs (`visibility.h`, `job.h`).
-- **build/**: Makefile (`gcc` default; `STATIC=1 CC=musl-gcc` optional).
-- **docs/**: CAPABILITIES (shipped vs planned), INSTALL-NODE, systemd units.
+| Piece | Role |
+|-------|------|
+| `cluster` CLI | `setup` / `nodes` / `collect` |
+| `services/warden_setup.py` | Password SSH → checks → key → install binary |
+| `services/warden_bridge.py` | Key SSH → run collector → parse stdout → store |
+| `services/node_inventory.py` | Enrolled nodes (no passwords) |
+| `wardens/collector/` | stdout JSON bridge (`lxc` + permissions) |
+| `wardens/runner/` | Skeleton only |
+| `routers/wardens.py` | HTTP: enrolled, collect, reports |
 
 ## Phase status
 
 | Phase | Status |
 |-------|--------|
-| 0 Data models & contracts | **Done** — headers + Pydantic `CollectorReport` |
-| 1 Collector core MVP | **Done for lab** — multi-LXC parse, env URL/node, register+report, file store API, systemd timer templates |
+| 0 Data models & contracts | **Done** |
+| 1 Push collector MVP | **Superseded** (HTTP ingest kept for tests/transition) |
+| 1b MCP setup + pull bridge | **Landed on feature branch** |
 | 2 Runner core | **Not started** — skeleton only |
 | 3 CephFS/Docker collectors | **Not started** |
-| OpenKEEP extract | **Deferred** until contracts stabilize |
+| OpenKEEP extract | **Deferred** |
 
 ## Build & deployment
 
 ```bash
 cd wardens/build && make collector
+cluster setup --ip <node-ip>
 ```
 
-- Dynamic `gcc` + libcurl for lab; static musl optional for PVE portability.
-- **Ops:** Hephaestus builds; Lamassu installs on PVE nodes (see `docs/INSTALL-NODE.md`).
+- No libcurl on the bridge. Static musl optional: `make STATIC=1 CC=musl-gcc collector`
+- **Ops:** Hephaestus builds; operator/Lamassu runs `cluster setup` from MCP host (see `docs/INSTALL-NODE.md`).
 
 ## Integration with ClusterMCP
 
-Shipped router: `routers/wardens.py` (not separate wardens_collector/jobs modules yet).  
-Auth: optional global `MCP_API_KEY` middleware.  
-Store: `WARDENS_DATA_DIR` JSON files.
+- Inventory: `$WARDENS_DATA_DIR/nodes/*.json` + `ssh/warden-*` keys  
+- Reports: same store as before via MCP-initiated collect  
+- Auth to API: optional global `MCP_API_KEY` middleware  
+- Deprecated push: `POST /wardens/register`, `POST /wardens/collector/report`
 
 ## Packaging
 
 - Near term: nested under ClusterMCP repo (`wardens/`).
 - Standalone `/root/seneschal/repos/wardens` is **pointer-only** (ADR 0002).
 
-## Next after lab dogfood
+## Next
 
-1. Ceph thin collector slice that matches home-lab pain points.  
-2. Heartbeat/`last_seen` on register.  
-3. Runner Phase 2 only after collector proves useful on all nodes.  
+1. MCP-side interval scheduler (cron/systemd calling `cluster collect` or HTTP).
+2. Ceph thin bridge slice for home-lab pain points.
+3. Runner Phase 2 only after pull-collect proves useful on all nodes.
 4. OpenKEEP public extract when API freezes.

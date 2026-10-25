@@ -20,15 +20,23 @@ Keep origin as clean HTTPS (never embed PATs). Clone into `/opt/clustermcp`.
 - Dogfood for Stronghold → extractable OpenKEEP template.
 - **Wardens** = per-node C binaries on Proxmox hosts (not a PVE UI add-on) for host-local visibility; see `wardens/docs/`.
 
-## Wardens (node agents)
+## Wardens (node bridge — MCP control plane)
 
-Nested SoR: `wardens/`. Collector MVP pushes LXC + permission snapshots to `/wardens/*`.
+Nested SoR: `wardens/`. **ClusterMCP initiates** setup and collection. The on-node
+binary is a bridge (stdout JSON over SSH) — it does not call MCP and has no MCP URL.
 
-- Capabilities (shipped vs planned): `wardens/docs/CAPABILITIES.md`
-- Node install (lab): `wardens/docs/INSTALL-NODE.md`
-- Build: `cd wardens/build && make collector`
+```bash
+make -C wardens/build collector
+cluster setup --ip <node-ip>          # password prompted; never stored
+cluster collect --node <hostname>
+# HTTP: POST /wardens/nodes/{node}/collect
+```
 
-Runner remains a non-functional skeleton — do not enable on nodes yet.
+- Capabilities: `wardens/docs/CAPABILITIES.md`
+- Install / enroll: `wardens/docs/INSTALL-NODE.md`
+
+Runner remains a non-functional skeleton — do not enable on nodes.
+
 
 ## Quick Deploy (LXC Recommended — Current Setup)
 

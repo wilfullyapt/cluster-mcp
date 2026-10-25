@@ -146,3 +146,45 @@ def test_list_reports(client: TestClient) -> None:
     assert r.status_code == 200
     nodes = r.json()["data"]["nodes"]
     assert set(nodes) == {"n1", "n2"}
+
+
+def test_enrolled_lists_inventory(client: TestClient, wardens_data_dir: Path) -> None:
+    from services.node_inventory import NodeInventory, NodeRecord
+
+    inv = NodeInventory(wardens_data_dir)
+    inv.save(
+        NodeRecord(
+            node="pvenodeone",
+            host="192.168.0.10",
+            key_name="warden-pvenodeone",
+        )
+    )
+    r = client.get("/wardens/enrolled")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["data"]["nodes"][0]["node"] == "pvenodeone"
+    assert body["data"]["nodes"][0]["host"] == "192.168.0.10"
+
+
+def test_collect_endpoint_uses_bridge(client: TestClient, wardens_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from services.node_inventory import NodeInventory, NodeRecord
+
+    inv = NodeInventory(wardens_data_dir)
+    inv.save(
+        NodeRecord(
+            node="pvenodeone",
+            host="192.168.0.10",
+            key_name="warden-pvenodeone",
+        )
+    )
+
+    def fake_collect(node: str, **_kwargs):
+        assert node == "pvenodeone"
+        return _sample_report("pvenodeone")
+
+    monkeypatch.setattr("services.warden_bridge.collect_node", fake_collect)
+    r = client.post("/wardens/nodes/pvenodeone/collect")
+    assert r.status_code == 200
+    assert r.json()["success"] is True
+    assert r.json()["data"]["node"] == "pvenodeone"

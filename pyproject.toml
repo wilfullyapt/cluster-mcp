@@ -19,6 +19,13 @@ version = "0.8.0-dev"
 description = "ClusterMCP Server"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+cluster = "cluster_cli:main"
+
+[tool.setuptools]
+py-modules = ["cluster_cli", "main", "models", "config", "security", "logging_config", "pve_client", "exceptions"]
 
 [tool.setuptools.packages.find]
 where = ["."]
