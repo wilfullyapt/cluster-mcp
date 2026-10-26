@@ -113,7 +113,7 @@ int collect_all_lxc(lxc_visibility_t *out, size_t max, size_t *count, const char
         if (sscanf(entry->d_name, "%d.conf", &vmid) != 1) {
             continue;
         }
-        snprintf(path, sizeof(path), "/etc/pve/lxc/%s", entry->d_name);
+        snprintf(path, sizeof(path), "/etc/pve/lxc/%.200s", entry->d_name);
         if (parse_lxc_conf(&out[*count], path, vmid, node_name) == 0) {
             (*count)++;
         }

@@ -54,8 +54,8 @@ class UpdateResult:
 
 
 DEFAULT_COLLECTOR_REMOTE = "/opt/wardens/bin/wardens-collector"
-WARDEN_VERSION = "0.3.0"
-COLLECTOR_CAPS = ["lxc:full", "permissions:audit"]
+WARDEN_VERSION = "0.4.0"
+COLLECTOR_CAPS = ["lxc:full", "permissions:audit", "host:summary"]
 
 
 def _local_collector_bin() -> Path:

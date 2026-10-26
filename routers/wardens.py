@@ -70,11 +70,25 @@ class PermissionDiag(BaseModel):
     mapping_note: str = ""
 
 
+class HostVisibility(BaseModel):
+    """Node host summary from the bridge (load, memory, uptime, kernel, pve)."""
+
+    loadavg_1: float | None = None
+    loadavg_5: float | None = None
+    loadavg_15: float | None = None
+    mem_total_bytes: int | None = None
+    mem_available_bytes: int | None = None
+    uptime_seconds: float | None = None
+    kernel: str = ""
+    pve_version: str = ""
+
+
 class CollectorReport(BaseModel):
     node: str
     warden_version: str = "0.0.0"
     lxc: list[LxcVisibilityItem] = Field(default_factory=list)
     permission: PermissionDiag | None = None
+    host: HostVisibility | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("node")
@@ -324,3 +338,37 @@ def update_node_bridge(node: str) -> ActionResponse:
             "message": result.message,
         },
     )
+
+
+@router.post("/fleet-sync", response_model=ActionResponse)
+def fleet_sync_endpoint(
+    build: bool = True,
+    update: bool = True,
+    collect: bool = True,
+) -> ActionResponse:
+    """Build bridge (optional), push to all enrolled nodes, optional collect-all."""
+    from services.warden_fleet import FleetSyncError, fleet_sync
+    from services.warden_setup import WARDEN_VERSION
+
+    try:
+        result = fleet_sync(
+            do_build=build,
+            do_update=update,
+            do_collect=collect,
+            version=WARDEN_VERSION,
+        )
+    except FleetSyncError as exc:
+        return ActionResponse(success=False, error=str(exc))
+    return ActionResponse(success=result.success, data=result.to_dict())
+
+
+@router.post("/collect-all", response_model=ActionResponse)
+def collect_all_enrolled() -> ActionResponse:
+    """MCP-initiated collect for every enrolled node (no binary rebuild)."""
+    from services.warden_fleet import FleetSyncError, fleet_sync
+
+    try:
+        result = fleet_sync(do_build=False, do_update=False, do_collect=True)
+    except FleetSyncError as exc:
+        return ActionResponse(success=False, error=str(exc))
+    return ActionResponse(success=result.success, data=result.to_dict())
