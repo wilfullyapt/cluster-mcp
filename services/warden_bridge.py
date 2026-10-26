@@ -1,7 +1,7 @@
 """MCP pulls visibility through the on-node Warden bridge.
 
-The bridge binary prints one CollectorReport JSON document to stdout.
-It does not know ClusterMCP's URL and never initiates contact.
+Uses forced-command SSH (`collect`) when enrolled with ssh_key_forced.
+Falls back to legacy shell one-liner only if forced command is rejected.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from typing import Any
 from routers.wardens import CollectorReport, get_store
 from services.node_inventory import NodeInventory, get_inventory
 from services.ssh_transport import ParamikoSSH, SSHTransport
+from services.warden_ssh_policy import collect_remote_command, legacy_collect_shell
 
 
 class BridgeError(Exception):
@@ -46,15 +47,9 @@ def collect_node(
         if owns_transport or not getattr(ssh, "connected", False):
             ssh.connect_key(rec.host, rec.ssh_user, key_path, port=rec.ssh_port)
 
-        # Source env for WARDEN_NODE; binary prints JSON report to stdout
-        cmd = (
-            f"set -a; "
-            f"[ -f /etc/wardens/collector.env ] && . /etc/wardens/collector.env; "
-            f"set +a; "
-            f"WARDEN_NODE=${{WARDEN_NODE:-{rec.node}}} "
-            f"{rec.collector_path}"
-        )
-        code, out, err = ssh.run(cmd)
+        code, out, err = ssh.run(collect_remote_command())
+        if code != 0 and "not allowed" in (err + out).lower():
+            code, out, err = ssh.run(legacy_collect_shell(rec.node, rec.collector_path))
         if code != 0:
             raise BridgeError(f"collector exit {code} on {node}: {err.strip() or out.strip()}")
 
@@ -66,7 +61,6 @@ def collect_node(
         except json.JSONDecodeError as exc:
             raise BridgeError(f"collector stdout is not JSON on {node}: {exc}") from exc
 
-        # Force node identity from inventory (bridge may omit or disagree)
         raw["node"] = rec.node
         report = CollectorReport.model_validate(raw)
         get_store().save_report(report)

@@ -3,6 +3,7 @@
 This is the single source of truth for the self-maintenance flow.
 """
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Any, Protocol
@@ -150,13 +151,35 @@ class UpdateOrchestrator:
                 "output": "\n".join(output_lines),
             }
 
+        # Success - optional fleet-sync before restart (same process still alive)
+        fleet_msg = ""
+        if os.getenv("FLEET_SYNC_ON_OTA", "true").strip().lower() in ("1", "true", "yes"):
+            try:
+                from services.warden_fleet import FleetSyncError, fleet_sync
+                from services.warden_setup import WARDEN_VERSION
+
+                fr = fleet_sync(
+                    do_build=True,
+                    do_update=True,
+                    do_collect=True,
+                    version=WARDEN_VERSION,
+                )
+                fleet_msg = f" fleet-sync: {fr.message} success={fr.success}"
+                self.logger.info("OTA fleet-sync finished", success=fr.success, message=fr.message)
+            except FleetSyncError as exc:
+                fleet_msg = f" fleet-sync skipped/failed: {exc}"
+                self.logger.warning("OTA fleet-sync not run", error=str(exc))
+            except Exception as exc:  # noqa: BLE001
+                fleet_msg = f" fleet-sync error: {exc}"
+                self.logger.warning("OTA fleet-sync error", error=str(exc))
+
         # Success - restart service
         restarted, restart_msg = self._restart_service() if hasattr(self, "_restart_service") else (True, "No restart method")
         self.record_last_known_good()
         self.logger.info("Update completed successfully", ref=ref, restarted=restarted)
         return {
             "success": True,
-            "message": f"Update to {ref} completed. Restart: {restart_msg}",
+            "message": f"Update to {ref} completed. Restart: {restart_msg}.{fleet_msg}",
             "output": "\n".join(output_lines),
         }
 

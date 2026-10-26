@@ -20,7 +20,7 @@ endif
 
 all: collector runner
 
-collector: ../collector/main.c ../collector/lxc.c ../collector/permissions.c ../collector/host.c
+collector: ../collector/main.c ../collector/lxc.c ../collector/permissions.c ../collector/host.c ../collector/cephfs.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 runner: ../runner/main.c

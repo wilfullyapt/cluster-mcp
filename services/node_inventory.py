@@ -39,8 +39,8 @@ class NodeRecord:
 
     def __post_init__(self) -> None:
         self.node = _safe_node_name(self.node)
-        if self.auth_method != "ssh_key":
-            raise ValueError("only ssh_key auth_method is supported for enrolled nodes")
+        if self.auth_method not in ("ssh_key", "ssh_key_forced"):
+            raise ValueError("auth_method must be ssh_key or ssh_key_forced")
 
 
 class NodeInventory:

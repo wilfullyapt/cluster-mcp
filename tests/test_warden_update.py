@@ -42,9 +42,10 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_update_pushes_new_binary_over_key_auth(data_dir: Path) -> None:
     ssh = FakeSSH(host="")
     ssh.exec_results = {
-        "install -d": (0, "", ""),
-        "test -x /opt/wardens/bin/wardens-collector": (0, "", ""),
-    }
+               "install -d": (0, "", ""),
+               "test -x /opt/wardens/bin/wardens-collector": (0, "", ""),
+               "install-binary": (0, '{"ok":true,"bytes":12}\n', ""),
+           }
     result = update_warden_binary(
         "pvenodeone",
         inventory=NodeInventory(data_dir),
@@ -53,7 +54,7 @@ def test_update_pushes_new_binary_over_key_auth(data_dir: Path) -> None:
     )
     assert result.success is True
     assert result.node == "pvenodeone"
-    assert ssh.files["/opt/wardens/bin/wardens-collector"] == b"\x7fELFnew-bridge"
+    assert ssh.files.get("stdin:install-binary") == b"\x7fELFnew-bridge"
     assert ssh.password is None
 
 

@@ -63,6 +63,16 @@ app.include_router(admin.router)
 app.include_router(report.router)
 app.include_router(wardens.router)
 
+# Optional MCP-side interval collect for enrolled Wardens
+try:
+    from services.warden_scheduler import start_wardens_collect_scheduler
+
+    _sched = start_wardens_collect_scheduler()
+    if _sched.get("started"):
+        logger.info("Wardens collect scheduler enabled", **{k: v for k, v in _sched.items() if k != "started"})
+except Exception as _sched_exc:  # noqa: BLE001
+    logger.warning("Wardens collect scheduler not started", error=str(_sched_exc))
+
 # Optional API key protection on all routes (if MCP_API_KEY is set)
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):

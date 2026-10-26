@@ -60,8 +60,12 @@ def test_collect_parses_stdout_json_and_stores_report(data_dir: Path) -> None:
     ssh = FakeSSH(host="")
     payload = json.dumps(SAMPLE_REPORT)
     ssh.exec_results = {
-        "/opt/wardens/bin/wardens-collector": (0, payload + "\n", "collector stderr ok\n"),
-    }
+               "install -d": (0, "", ""),
+               "test -x /opt/wardens/bin/wardens-collector": (0, "", ""),
+               "install-binary": (0, '{"ok":true}\n', ""),
+               "collect": (0, payload + "\n", "collector stderr ok\n"),
+               "/opt/wardens/bin/wardens-collector": (0, payload + "\n", "collector stderr ok\n"),
+           }
     report = collect_node(
         "pvenodeone",
         inventory=NodeInventory(data_dir),
@@ -91,8 +95,9 @@ def test_collect_unknown_node_raises(data_dir: Path) -> None:
 def test_collect_rejects_non_json_stdout(data_dir: Path) -> None:
     ssh = FakeSSH(host="")
     ssh.exec_results = {
-        "/opt/wardens/bin/wardens-collector": (0, "not-json\n", ""),
-    }
+               "/opt/wardens/bin/wardens-collector": (0, "not-json\n", ""),
+               "collect": (0, "not-json\n", ""),
+           }
     with pytest.raises(BridgeError, match="JSON"):
         collect_node(
             "pvenodeone",

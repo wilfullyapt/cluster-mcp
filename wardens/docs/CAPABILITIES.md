@@ -52,8 +52,9 @@ Persistence: `WARDENS_DATA_DIR` — `nodes/`, `ssh/`, `capabilities/`, `reports/
 |------------|--------|----------|
 | `lxc:full` | **shipped** | Enumerate `/etc/pve/lxc/*.conf` (up to 64) |
 | `permissions:audit` | **shipped** | `stat` + `access` on `/etc/pve/lxc` |
-| `host:summary` | **shipped** | loadavg, mem total/available, uptime, kernel, pveversion |
-| stdout JSON | **shipped** | `WARDEN_NODE` required; no MCP URL |
+| `host:summary` | **shipped** | loadavg, mem, uptime, kernel, pveversion |
+| `cephfs:mapping` | **shipped** | ceph-ish LXC mp* + storage.cfg cephfs names |
+| stdout JSON | **shipped** | forced-command `collect`; no MCP URL |
 
 ### Runner binary
 

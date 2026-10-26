@@ -83,12 +83,24 @@ class HostVisibility(BaseModel):
     pve_version: str = ""
 
 
+class CephfsVisibilityItem(BaseModel):
+    subvolume: str = ""
+    host_path: str = ""
+    container_mount: str = ""
+    cephfs_name: str = ""
+    owner: str = ""
+    permissions: str = ""
+    quota_bytes: int | None = None
+    used_bytes: int | None = None
+
+
 class CollectorReport(BaseModel):
     node: str
     warden_version: str = "0.0.0"
     lxc: list[LxcVisibilityItem] = Field(default_factory=list)
     permission: PermissionDiag | None = None
     host: HostVisibility | None = None
+    cephfs: list[CephfsVisibilityItem] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("node")

@@ -54,8 +54,8 @@ class UpdateResult:
 
 
 DEFAULT_COLLECTOR_REMOTE = "/opt/wardens/bin/wardens-collector"
-WARDEN_VERSION = "0.4.0"
-COLLECTOR_CAPS = ["lxc:full", "permissions:audit", "host:summary"]
+WARDEN_VERSION = "0.5.0"
+COLLECTOR_CAPS = ["lxc:full", "permissions:audit", "host:summary", "cephfs:mapping"]
 
 
 def _local_collector_bin() -> Path:
@@ -148,33 +148,46 @@ def _enroll_connected(
             raise SetupError(f"private key exists without public key: {private_path}")
 
     pub_line = pub_path.read_text(encoding="utf-8").strip()
+    from_cidrs = os.getenv("WARDENS_SSH_FROM", "").strip() or None
+    from services.warden_ssh_policy import (
+        WRAPPER_REMOTE,
+        authorized_keys_line,
+    )
 
-    # --- install authorized key ---
-    transport.run("mkdir -p /root/.ssh")
-    transport.run("chmod 700 /root/.ssh")
-    # Avoid duplicate entries
-    grep_cmd = f"grep -qxF {shlex.quote(pub_line)} /root/.ssh/authorized_keys"
-    code, _, _ = transport.run(grep_cmd)
-    if code != 0:
-        # append
-        append_cmd = f"echo {shlex.quote(pub_line)} >> /root/.ssh/authorized_keys"
-        code, _, err = transport.run(append_cmd)
-        if code != 0:
-            raise SetupError(f"failed to install authorized key: {err}")
-        transport.run("chmod 600 /root/.ssh/authorized_keys")
+    ak_line = authorized_keys_line(pub_line, from_cidrs=from_cidrs)
+    # key material (base64) for scrubbing old unrestricted lines
+    parts = pub_line.split()
+    key_mat = parts[1] if len(parts) >= 2 else pub_line
 
-    # --- install collector bridge binary ---
+    # --- install SSH wrapper + bridge (password session = full shell once) ---
     local_bin = _local_collector_bin()
     if not local_bin.is_file():
         raise SetupError(
             f"collector binary not found at {local_bin}; build with: make -C wardens/build collector"
         )
-    data = local_bin.read_bytes()
-    transport.run("install -d /opt/wardens/bin /etc/wardens")
-    transport.write_file(DEFAULT_COLLECTOR_REMOTE, data, mode=0o755)
-    code, _, _ = transport.run(f"test -x {DEFAULT_COLLECTOR_REMOTE}")
+    wrapper_src = Path(__file__).resolve().parent.parent / "wardens" / "docs" / "scripts" / "wardens-ssh-wrapper.sh"
+    if not wrapper_src.is_file():
+        raise SetupError(f"SSH wrapper missing: {wrapper_src}")
+
+    transport.run("install -d /opt/wardens/bin /etc/wardens /root/.ssh")
+    transport.run("chmod 700 /root/.ssh")
+    transport.write_file(WRAPPER_REMOTE, wrapper_src.read_bytes(), mode=0o755)
+    transport.write_file(DEFAULT_COLLECTOR_REMOTE, local_bin.read_bytes(), mode=0o755)
+    code, _, _ = transport.run(f"test -x {DEFAULT_COLLECTOR_REMOTE} && test -x {WRAPPER_REMOTE}")
     if code != 0:
-        raise SetupError("collector binary not executable on remote after install")
+        raise SetupError("collector or SSH wrapper not executable on remote after install")
+
+    # Scrub prior lines for this key, install forced-command line only
+    scrub = (
+        f"touch /root/.ssh/authorized_keys; "
+        f"grep -v {shlex.quote(key_mat)} /root/.ssh/authorized_keys > /tmp/wardens-ak.new || true; "
+        f"echo {shlex.quote(ak_line)} >> /tmp/wardens-ak.new; "
+        f"mv /tmp/wardens-ak.new /root/.ssh/authorized_keys; "
+        f"chmod 600 /root/.ssh/authorized_keys"
+    )
+    code, _, err = transport.run(scrub)
+    if code != 0:
+        raise SetupError(f"failed to install restricted authorized_keys: {err}")
 
     # Drop a minimal env file — node name only; NO ClusterMCP URL (pull model)
     env_body = (
@@ -189,7 +202,7 @@ def _enroll_connected(
         host=request.host,
         ssh_user=request.ssh_user,
         ssh_port=request.ssh_port,
-        auth_method="ssh_key",
+        auth_method="ssh_key_forced",
         key_name=key_name,
         collector_path=DEFAULT_COLLECTOR_REMOTE,
         warden_version=WARDEN_VERSION,
@@ -252,15 +265,24 @@ def update_warden_binary(
     try:
         if owns:
             transport.connect_key(rec.host, rec.ssh_user, key_path, port=rec.ssh_port)
-        transport.run("install -d /opt/wardens/bin /etc/wardens")
-        transport.write_file(rec.collector_path, local_bin.read_bytes(), mode=0o755)
-        code, _, _ = transport.run(f"test -x {rec.collector_path}")
+
+        from services.warden_ssh_policy import install_binary_remote_command
+
+        payload = local_bin.read_bytes()
+        # Forced-command path: SSH_ORIGINAL_COMMAND=install-binary, binary on stdin
+        run_stdin = getattr(transport, "run_stdin", None)
+        if run_stdin is None:
+            raise UpdateError("transport does not support run_stdin (required for forced-command install)")
+        code, out, err = run_stdin(install_binary_remote_command(), payload)
         if code != 0:
-            raise UpdateError("collector binary not executable on remote after update")
+            raise UpdateError(
+                f"install-binary failed on {node}: {err.strip() or out.strip()} "
+                "(node may need re-setup for forced-command wrapper)"
+            )
 
-        env_body = f"WARDEN_NODE={rec.node}\nWARDEN_VERSION={version}\n"
-        transport.write_file("/etc/wardens/collector.env", env_body.encode(), mode=0o644)
-
+        # env file cannot be written via forced command — bake version into collect env only
+        # if open shell still available this would work; for forced keys, env is set at setup
+        # and version is in inventory. Optional: extend wrapper to accept set-env later.
         rec.warden_version = version
         inventory.save(rec)
         return UpdateResult(
@@ -268,7 +290,7 @@ def update_warden_binary(
             node=rec.node,
             collector_path=rec.collector_path,
             warden_version=version,
-            message=f"updated bridge on {rec.node} to {version}",
+            message=f"updated bridge on {rec.node} to {version} via install-binary",
         )
     finally:
         if owns:

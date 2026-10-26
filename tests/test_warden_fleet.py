@@ -72,6 +72,12 @@ def test_fleet_sync_updates_all_and_collects(fleet_dir: Path) -> None:
         ssh.exec_results = {
             "install -d": (0, "", ""),
             "test -x /opt/wardens/bin/wardens-collector": (0, "", ""),
+            "install-binary": (0, '{"ok":true}\n', ""),
+            "collect": (
+                0,
+                json.dumps({**report, "node": "x"}) + "\n",
+                "",
+            ),
             "/opt/wardens/bin/wardens-collector": (
                 0,
                 json.dumps({**report, "node": "x"}) + "\n",
@@ -124,14 +130,12 @@ def test_fleet_sync_partial_failure_still_reports(fleet_dir: Path) -> None:
         if call_n["i"] == 1:
             # first node update fails
             ssh.exec_results = {
-                "install -d": (0, "", ""),
-                "test -x /opt/wardens/bin/wardens-collector": (1, "", "missing"),
+                "install-binary": (1, "", "missing"),
             }
         else:
             ssh.exec_results = {
-                "install -d": (0, "", ""),
-                "test -x /opt/wardens/bin/wardens-collector": (0, "", ""),
-                "/opt/wardens/bin/wardens-collector": (
+                "install-binary": (0, '{"ok":true}\n', ""),
+                "collect": (
                     0,
                     json.dumps(
                         {

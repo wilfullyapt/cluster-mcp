@@ -81,8 +81,32 @@ static int parse_lxc_conf(lxc_visibility_t *out, const char *path, int vmid, con
         } else if (strcmp(key, "cores") == 0) {
             out->cores = (uint32_t)atoi(value);
         } else if (strcmp(key, "memory") == 0) {
-            /* conf memory is MiB; store as bytes hint in memory_used field name is imperfect */
+            /* conf memory is MiB */
             out->memory_used = (uint64_t)atoll(value) * 1024ULL * 1024ULL;
+        } else if (strcmp(key, "ostype") == 0) {
+            /* pack ostype into status prefix if still unknown */
+            if (strcmp(out->status, "unknown") == 0) {
+                snprintf(out->status, sizeof(out->status), "ostype:%s", value);
+            }
+        } else if (strcmp(key, "onboot") == 0) {
+            size_t used = strlen(out->mounts);
+            if (used + 16 < sizeof(out->mounts)) {
+                if (used) {
+                    strncat(out->mounts, ";", sizeof(out->mounts) - used - 1);
+                }
+                strncat(out->mounts, "onboot=", sizeof(out->mounts) - strlen(out->mounts) - 1);
+                strncat(out->mounts, value, sizeof(out->mounts) - strlen(out->mounts) - 1);
+            }
+        } else if (strcmp(key, "tags") == 0 || strcmp(key, "description") == 0) {
+            size_t used = strlen(out->idmap);
+            if (used + strlen(key) + strlen(value) + 4 < sizeof(out->idmap)) {
+                if (used) {
+                    strncat(out->idmap, ";", sizeof(out->idmap) - used - 1);
+                }
+                strncat(out->idmap, key, sizeof(out->idmap) - strlen(out->idmap) - 1);
+                strncat(out->idmap, "=", sizeof(out->idmap) - strlen(out->idmap) - 1);
+                strncat(out->idmap, value, sizeof(out->idmap) - strlen(out->idmap) - 1);
+            }
         }
     }
     fclose(f);
@@ -121,6 +145,29 @@ int collect_all_lxc(lxc_visibility_t *out, size_t max, size_t *count, const char
     closedir(dir);
 
     fprintf(stderr, "[collector] LXC visibility: %zu container(s) on node=%s\n", *count, node_name);
+
+    /* Enrich status from pct list when available */
+    {
+        FILE *pf = popen("pct list 2>/dev/null", "r");
+        char line[256];
+        if (pf) {
+            if (fgets(line, sizeof(line), pf)) {
+                /* skip header */
+            }
+            while (fgets(line, sizeof(line), pf)) {
+                int id = 0;
+                char st[64] = "";
+                if (sscanf(line, "%d %63s", &id, st) >= 2) {
+                    for (size_t i = 0; i < *count; i++) {
+                        if (out[i].vmid == id) {
+                            snprintf(out[i].status, sizeof(out[i].status), "%s", st);
+                        }
+                    }
+                }
+            }
+            pclose(pf);
+        }
+    }
     return 0;
 }
 
