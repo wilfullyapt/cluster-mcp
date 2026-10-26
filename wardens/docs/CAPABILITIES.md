@@ -9,6 +9,7 @@
 
 ```text
 operator:  cluster setup --ip <node>   # password ephemeral
+           cluster fleet-sync          # build + push all + collect
 ClusterMCP  --SSH key-->  wardens-collector (stdout JSON)
 ClusterMCP  schedules intervals / runs; bridge never calls MCP
 ```
@@ -19,67 +20,69 @@ ClusterMCP  schedules intervals / runs; bridge never calls MCP
 
 | Command | Notes |
 |---------|--------|
-| `cluster setup --ip <addr>` | Password prompt/stdin; install bridge; enroll; **initial collect by default** |
+| `cluster setup --ip <addr>` | Password once; install bridge; enroll; initial collect |
 | `cluster nodes` | List enrolled inventory |
 | `cluster collect --node <name>` | MCP-initiated pull via bridge |
-| `cluster update --node <name>` / `--all` | Push rebuilt bridge via enrolled key (no password) |
+| `cluster collect --all` | Collect every enrolled node |
+| `cluster update --node\|--all` | Push rebuilt bridge via key (no password) |
+| `cluster fleet-sync` | **One shot:** build + update all + collect all |
 
 ### ClusterMCP HTTP API
 
 | Method | Path | Notes |
 |--------|------|--------|
 | `GET` | `/wardens/enrolled` | Inventory from `cluster setup` |
-| `POST` | `/wardens/nodes/{node}/collect` | MCP-initiated collect over SSH bridge |
-| `POST` | `/wardens/nodes/{node}/update` | Push rebuilt bridge binary via enrolled key |
+| `POST` | `/wardens/nodes/{node}/collect` | Collect one node |
+| `POST` | `/wardens/collect-all` | Collect every enrolled node |
+| `POST` | `/wardens/nodes/{node}/update` | Push bridge binary |
+| `POST` | `/wardens/fleet-sync` | Build + push all + collect (query: build/update/collect) |
 | `GET` | `/wardens/nodes/{node}/report` | Last stored report |
 | `GET` | `/wardens/reports` | Nodes with a stored report |
-| `GET` | `/wardens/nodes` | Capability summaries (mirrored on enroll) |
-| `GET` | `/wardens/nodes/{node}/capabilities` | Full caps document |
+| `GET` | `/wardens/nodes` | Capability summaries |
+| `GET` | `/wardens/nodes/{node}/capabilities` | Full caps |
 | `GET` | `/wardens/capabilities` | Union of cap strings |
 
-**Deprecated (push model):** `POST /wardens/register`, `POST /wardens/collector/report` remain for transition/tests but are **not** the setup path. Bridges do not call them.
+**Deprecated:** `POST /wardens/register`, `POST /wardens/collector/report` (push model).
 
-Persistence: `WARDENS_DATA_DIR` (default `/var/lib/clustermcp/wardens`) — `nodes/`, `ssh/`, `capabilities/`, `reports/`. **Passwords never stored.**
+Persistence: `WARDENS_DATA_DIR` — `nodes/`, `ssh/`, `capabilities/`, `reports/`. **No passwords.**
 
-### Collector bridge (`wardens/build/collector`)
+### Collector bridge (`wardens/build/collector`) v0.4.0
 
 | Capability | Status | Behavior |
 |------------|--------|----------|
-| `lxc:full` | **MVP** | Enumerate `/etc/pve/lxc/*.conf` (up to 64) |
-| `permissions:audit` | **MVP** | `stat` + `access` on `/etc/pve/lxc` |
-| stdout JSON report | **MVP** | Env: `WARDEN_NODE`, optional `WARDEN_VERSION` |
-| Outbound to MCP | **Removed** | Bridge has no MCP URL |
+| `lxc:full` | **shipped** | Enumerate `/etc/pve/lxc/*.conf` (up to 64) |
+| `permissions:audit` | **shipped** | `stat` + `access` on `/etc/pve/lxc` |
+| `host:summary` | **shipped** | loadavg, mem, uptime, kernel, pveversion |
+| `cephfs:mapping` | **shipped** | ceph-ish LXC mp* + storage.cfg cephfs names |
+| stdout JSON | **shipped** | forced-command `collect`; no MCP URL |
 
 ### Runner binary
 
 | Status | Notes |
 |--------|--------|
-| **Skeleton only** | No signing/seccomp/jobs. **Do not enable.** |
+| **Skeleton only** | Do not enable |
 
 ## Target state (not shipped)
 
 | Item | Description |
 |------|-------------|
-| MCP-side interval scheduler | systemd timer / internal job on MCP host |
-| `cephfs:mapping` / `docker:status` | Extra bridge collect slices |
-| Signed runner allow-list | MCP-initiated mutate jobs |
-| mTLS or SSH CA | Stronger node auth than per-node keys |
+| MCP-side interval scheduler | systemd timer calling collect-all |
+| OTA post-hook → fleet-sync | Auto after admin update |
+| `cephfs:mapping` / `docker:status` | Extra bridge slices |
+| Signed runner allow-list | MCP-initiated mutate |
 
-## Enrollment record (inventory — shipped)
+## Enrollment record
 
 ```json
 {
-  "node": "pvenodeone",
-  "host": "192.168.0.10",
-  "ssh_user": "root",
-  "ssh_port": 22,
+  "node": "pvenodetwo",
+  "host": "192.168.0.242",
   "auth_method": "ssh_key",
-  "key_name": "warden-pvenodeone",
+  "key_name": "warden-pvenodetwo",
   "collector_path": "/opt/wardens/bin/wardens-collector",
-  "warden_version": "0.3.0",
-  "collector_caps": ["lxc:full", "permissions:audit"],
-  "runner_allowlist": []
+  "warden_version": "0.4.0",
+  "collector_caps": ["lxc:full", "permissions:audit", "host:summary"]
 }
 ```
 
-See `INSTALL-NODE.md` and `../IMPLEMENTATION.md`.
+See `INSTALL-NODE.md` and Reliquary `domains/shipyard/maps/clustermcp-wardens-control-plane.md`.

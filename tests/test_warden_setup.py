@@ -48,6 +48,16 @@ class FakeSSH:
                 return val
         return 0, "", ""
 
+    def run_stdin(self, command: str, data: bytes) -> tuple[int, str, str]:
+        self.commands.append(f"{command}<<stdin:{len(data)}>>")
+        self.files[f"stdin:{command}"] = data
+        if command in self.exec_results:
+            return self.exec_results[command]
+        for key, val in self.exec_results.items():
+            if command.startswith(key) or key in command:
+                return val
+        return 0, '{"ok":true}\n', ""
+
     def write_file(self, remote_path: str, data: bytes, mode: int = 0o644) -> None:
         self.files[remote_path] = data
 
@@ -117,6 +127,9 @@ def test_setup_enrolls_node_and_does_not_persist_password(data_dir: Path) -> Non
     # collector binary uploaded
     assert "/opt/wardens/bin/wardens-collector" in ssh.files
     assert ssh.files["/opt/wardens/bin/wardens-collector"].startswith(b"\x7fELF")
+    assert "/opt/wardens/bin/wardens-ssh-wrapper" in ssh.files
+    # restricted key line installed (not bare pubkey alone)
+    assert any("command=" in c or "authorized_keys" in c for c in ssh.commands)
 
 
 def test_setup_rejects_non_pve_host(data_dir: Path) -> None:

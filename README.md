@@ -28,8 +28,9 @@ binary is a bridge (stdout JSON over SSH) — it does not call MCP and has no MC
 ```bash
 make -C wardens/build collector
 cluster setup --ip <node-ip>          # password prompted; never stored
-cluster collect --node <hostname>
-# HTTP: POST /wardens/nodes/{node}/collect
+cluster fleet-sync                    # build + push all + collect (after enroll)
+cluster collect --all
+# HTTP: POST /wardens/fleet-sync · POST /wardens/collect-all
 ```
 
 - Capabilities: `wardens/docs/CAPABILITIES.md`

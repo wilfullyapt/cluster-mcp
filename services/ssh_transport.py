@@ -13,6 +13,8 @@ class SSHTransport(Protocol):
 
     def run(self, command: str) -> tuple[int, str, str]: ...
 
+    def run_stdin(self, command: str, data: bytes) -> tuple[int, str, str]: ...
+
     def write_file(self, remote_path: str, data: bytes, mode: int = 0o644) -> None: ...
 
     def close(self) -> None: ...
@@ -77,6 +79,17 @@ class ParamikoSSH:
         code = stdout.channel.recv_exit_status()
         return code, out, err
 
+    def run_stdin(self, command: str, data: bytes) -> tuple[int, str, str]:
+        if self._client is None:
+            raise RuntimeError("SSH not connected")
+        stdin, stdout, stderr = self._client.exec_command(command, timeout=180)
+        stdin.write(data)
+        stdin.channel.shutdown_write()
+        out = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        code = stdout.channel.recv_exit_status()
+        return code, out, err
+
     def write_file(self, remote_path: str, data: bytes, mode: int = 0o644) -> None:
         if self._client is None:
             raise RuntimeError("SSH not connected")
@@ -109,6 +122,7 @@ def generate_ed25519_keypair(private_path: Path, comment: str) -> tuple[Path, Pa
     from cryptography.hazmat.primitives.asymmetric import ed25519
 
     private_path.parent.mkdir(parents=True, exist_ok=True)
+    private_path.parent.chmod(0o700)
     key = ed25519.Ed25519PrivateKey.generate()
     pem = key.private_bytes(
         encoding=serialization.Encoding.PEM,

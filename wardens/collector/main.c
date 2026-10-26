@@ -23,6 +23,8 @@
 
 int collect_all_lxc(lxc_visibility_t *out, size_t max, size_t *count, const char *node_name);
 int collect_permission_diag(permission_diag_t *out, const char *target_path);
+int collect_host_visibility(host_visibility_t *out);
+int collect_cephfs_visibility(cephfs_visibility_t *out, size_t max, size_t *count);
 
 static const char *env_or(const char *key, const char *fallback) {
     const char *v = getenv(key);
@@ -110,6 +112,9 @@ static int build_report_json(
     const lxc_visibility_t *lxc,
     size_t lxc_count,
     const permission_diag_t *perm,
+    const host_visibility_t *host,
+    const cephfs_visibility_t *cephfs,
+    size_t cephfs_count,
     char *json,
     size_t size
 ) {
@@ -253,6 +258,84 @@ static int build_report_json(
         return -1;
     }
 
+    if (host && host->valid) {
+        char esc[256];
+        if (append_fmt(json, size, &used, ",\"host\":{") != 0) {
+            return -1;
+        }
+        if (append_fmt(
+                json,
+                size,
+                &used,
+                "\"loadavg_1\":%.2f,\"loadavg_5\":%.2f,\"loadavg_15\":%.2f,"
+                "\"mem_total_bytes\":%llu,\"mem_available_bytes\":%llu,"
+                "\"uptime_seconds\":%.0f,",
+                host->loadavg_1,
+                host->loadavg_5,
+                host->loadavg_15,
+                (unsigned long long)host->mem_total_bytes,
+                (unsigned long long)host->mem_available_bytes,
+                host->uptime_seconds
+            ) != 0) {
+            return -1;
+        }
+        if (json_escape_into(esc, sizeof(esc), host->kernel) != 0) {
+            return -1;
+        }
+        if (append_fmt(json, size, &used, "\"kernel\":\"%s\",", esc) != 0) {
+            return -1;
+        }
+        if (json_escape_into(esc, sizeof(esc), host->pve_version) != 0) {
+            return -1;
+        }
+        if (append_fmt(json, size, &used, "\"pve_version\":\"%s\"}", esc) != 0) {
+            return -1;
+        }
+    } else if (append_fmt(json, size, &used, ",\"host\":null") != 0) {
+        return -1;
+    }
+
+    if (append_fmt(json, size, &used, ",\"cephfs\":[") != 0) {
+        return -1;
+    }
+    for (size_t i = 0; i < cephfs_count; i++) {
+        const cephfs_visibility_t *c = &cephfs[i];
+        char esc2[512];
+        if (i > 0 && append_fmt(json, size, &used, ",") != 0) {
+            return -1;
+        }
+        if (append_fmt(json, size, &used, "{") != 0) {
+            return -1;
+        }
+        if (json_escape_into(esc2, sizeof(esc2), c->subvolume) != 0) {
+            return -1;
+        }
+        if (append_fmt(json, size, &used, "\"subvolume\":\"%s\",", esc2) != 0) {
+            return -1;
+        }
+        if (json_escape_into(esc2, sizeof(esc2), c->host_path) != 0) {
+            return -1;
+        }
+        if (append_fmt(json, size, &used, "\"host_path\":\"%s\",", esc2) != 0) {
+            return -1;
+        }
+        if (json_escape_into(esc2, sizeof(esc2), c->container_mount) != 0) {
+            return -1;
+        }
+        if (append_fmt(json, size, &used, "\"container_mount\":\"%s\",", esc2) != 0) {
+            return -1;
+        }
+        if (json_escape_into(esc2, sizeof(esc2), c->cephfs_name) != 0) {
+            return -1;
+        }
+        if (append_fmt(json, size, &used, "\"cephfs_name\":\"%s\"}", esc2) != 0) {
+            return -1;
+        }
+    }
+    if (append_fmt(json, size, &used, "]") != 0) {
+        return -1;
+    }
+
     if (append_fmt(json, size, &used, "}") != 0) {
         return -1;
     }
@@ -265,7 +348,10 @@ int main(int argc, char **argv) {
     char json[JSON_BUF];
     lxc_visibility_t lxc[WARDENS_MAX_LXC];
     permission_diag_t perm;
+    host_visibility_t host;
+    cephfs_visibility_t cephfs[16];
     size_t lxc_count = 0;
+    size_t cephfs_count = 0;
     (void)argc;
     (void)argv;
 
@@ -274,7 +360,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "WARDEN_NODE is required (e.g. export WARDEN_NODE=pvenodeone)\n");
         return 2;
     }
-    version = env_or("WARDEN_VERSION", "0.3.0");
+    version = env_or("WARDEN_VERSION", "0.5.0");
 
     fprintf(stderr, "Wardens bridge v%s collect (node=%s)\n", version, node);
 
@@ -287,16 +373,32 @@ int main(int argc, char **argv) {
         strncpy(perm.target_path, "/etc/pve/lxc", sizeof(perm.target_path) - 1);
         strncpy(perm.mapping_note, "stat failed", sizeof(perm.mapping_note) - 1);
     }
+    memset(&host, 0, sizeof(host));
+    if (collect_host_visibility(&host) != 0) {
+        fprintf(stderr, "[collector] host visibility incomplete (continuing)\n");
+    }
+    memset(cephfs, 0, sizeof(cephfs));
+    if (collect_cephfs_visibility(cephfs, 16, &cephfs_count) != 0) {
+        cephfs_count = 0;
+    }
 
-    if (build_report_json(node, version, lxc, lxc_count, &perm, json, sizeof(json)) != 0) {
+    if (build_report_json(
+            node, version, lxc, lxc_count, &perm, &host, cephfs, cephfs_count, json, sizeof(json)
+        ) != 0) {
         fprintf(stderr, "Failed to build report JSON\n");
         return 1;
     }
 
-    /* stdout is the bridge contract — MCP parses this exactly */
     fputs(json, stdout);
     fputc('\n', stdout);
     fflush(stdout);
-    fprintf(stderr, "Report JSON bytes: %zu lxc=%zu\n", strlen(json), lxc_count);
+    fprintf(
+        stderr,
+        "Report JSON bytes: %zu lxc=%zu cephfs=%zu host_valid=%d\n",
+        strlen(json),
+        lxc_count,
+        cephfs_count,
+        host.valid ? 1 : 0
+    );
     return 0;
 }

@@ -59,6 +59,19 @@ typedef struct {
     char mapping_note[256];   /* explanation of idmap or root squash */
 } permission_diag_t;
 
+/* 4b. Host summary (load, memory, uptime) — bridge MVP */
+typedef struct {
+    double loadavg_1;
+    double loadavg_5;
+    double loadavg_15;
+    uint64_t mem_total_bytes;
+    uint64_t mem_available_bytes;
+    double uptime_seconds;
+    char kernel[128];
+    char pve_version[128];
+    bool valid;
+} host_visibility_t;
+
 /* 5. Troubleshooting Bundle */
 typedef struct {
     char node[64];

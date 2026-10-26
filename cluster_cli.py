@@ -101,6 +101,16 @@ def cmd_nodes(_args: argparse.Namespace) -> int:
 
 def cmd_collect(args: argparse.Namespace) -> int:
     from services.warden_bridge import BridgeError, collect_node
+    from services.warden_fleet import FleetSyncError, fleet_sync
+
+    if getattr(args, "all", False):
+        try:
+            result = fleet_sync(do_build=False, do_update=False, do_collect=True)
+        except FleetSyncError as exc:
+            print(f"collect-all failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0 if result.success else 1
 
     try:
         report = collect_node(args.node)
@@ -109,6 +119,24 @@ def cmd_collect(args: argparse.Namespace) -> int:
         return 1
     print(json.dumps({"success": True, "data": report}, indent=2))
     return 0
+
+
+def cmd_fleet_sync(args: argparse.Namespace) -> int:
+    from services.warden_fleet import FleetSyncError, fleet_sync
+    from services.warden_setup import WARDEN_VERSION
+
+    try:
+        result = fleet_sync(
+            do_build=not args.no_build,
+            do_update=not args.no_update,
+            do_collect=not args.no_collect,
+            version=WARDEN_VERSION,
+        )
+    except FleetSyncError as exc:
+        print(f"fleet-sync failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result.to_dict(), indent=2))
+    return 0 if result.success else 1
 
 
 def cmd_update(args: argparse.Namespace) -> int:
@@ -185,7 +213,9 @@ def build_parser() -> argparse.ArgumentParser:
     n.set_defaults(func=cmd_nodes)
 
     c = sub.add_parser("collect", help="Pull a visibility report via the Warden bridge")
-    c.add_argument("--node", required=True, help="Enrolled node name")
+    c_group = c.add_mutually_exclusive_group(required=True)
+    c_group.add_argument("--node", help="Enrolled node name")
+    c_group.add_argument("--all", action="store_true", help="Collect every enrolled node")
     c.set_defaults(func=cmd_collect)
 
     u = sub.add_parser("update", help="Push rebuilt bridge binary via enrolled SSH key")
@@ -193,6 +223,15 @@ def build_parser() -> argparse.ArgumentParser:
     u_group.add_argument("--node", help="Enrolled node name")
     u_group.add_argument("--all", action="store_true", help="Update every enrolled node")
     u.set_defaults(func=cmd_update)
+
+    f = sub.add_parser(
+        "fleet-sync",
+        help="Build bridge, push to all enrolled nodes, collect (one control-plane action)",
+    )
+    f.add_argument("--no-build", action="store_true", help="Skip make collector")
+    f.add_argument("--no-update", action="store_true", help="Skip binary push")
+    f.add_argument("--no-collect", action="store_true", help="Skip collect-all after push")
+    f.set_defaults(func=cmd_fleet_sync)
 
     return p
 
