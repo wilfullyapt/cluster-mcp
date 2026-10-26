@@ -90,7 +90,7 @@ def test_setup_enrolls_node_and_does_not_persist_password(data_dir: Path) -> Non
     }
 
     result = setup_node(
-        SetupRequest(host="192.168.0.10", password="correct-horse", ssh_user="root"),
+        SetupRequest(host="192.168.0.10", password="correct-horse", ssh_user="root", collect_after=False),
         transport=ssh,
         inventory=NodeInventory(data_dir),
         keys_dir=data_dir / "ssh",
@@ -127,7 +127,7 @@ def test_setup_rejects_non_pve_host(data_dir: Path) -> None:
     }
     with pytest.raises(SetupError, match="not a Proxmox"):
         setup_node(
-            SetupRequest(host="10.0.0.9", password="correct-horse"),
+            SetupRequest(host="10.0.0.9", password="correct-horse", collect_after=False),
             transport=ssh,
             inventory=NodeInventory(data_dir),
             keys_dir=data_dir / "ssh",
@@ -139,7 +139,7 @@ def test_setup_auth_failure_does_not_enroll(data_dir: Path) -> None:
     ssh = FakeSSH(host="")
     with pytest.raises(SetupError, match="auth"):
         setup_node(
-            SetupRequest(host="10.0.0.9", password="wrong"),
+            SetupRequest(host="10.0.0.9", password="wrong", collect_after=False),
             transport=ssh,
             inventory=NodeInventory(data_dir),
             keys_dir=data_dir / "ssh",

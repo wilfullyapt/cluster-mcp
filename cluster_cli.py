@@ -4,6 +4,8 @@
   cluster setup --ip <ip> --password-stdin
   cluster nodes
   cluster collect --node <name>
+  cluster update --node <name>          # push new bridge binary via enrolled key
+  cluster update --all
 """
 
 from __future__ import annotations
@@ -31,7 +33,6 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if args.password_stdin:
         password = sys.stdin.readline().rstrip("\n")
     elif os.getenv("CLUSTER_SETUP_PASSWORD"):
-        # Optional automation hook; still not written to inventory
         password = os.environ.pop("CLUSTER_SETUP_PASSWORD", "")
     else:
         password = getpass.getpass(f"Password for {args.user}@{args.ip}: ")
@@ -51,6 +52,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 ssh_user=args.user,
                 ssh_port=args.port,
                 node=args.node,
+                collect_after=not args.no_collect,
             ),
             transport=transport,
             inventory=NodeInventory(data),
@@ -63,18 +65,20 @@ def cmd_setup(args: argparse.Namespace) -> int:
         password = ""  # noqa: F841
         transport.close()
 
-    print(
-        json.dumps(
-            {
-                "success": result.success,
-                "node": result.node,
-                "host": result.host,
-                "collector_path": result.collector_path,
-                "message": result.message,
-            },
-            indent=2,
-        )
-    )
+    payload = {
+        "success": result.success,
+        "node": result.node,
+        "host": result.host,
+        "collector_path": result.collector_path,
+        "message": result.message,
+    }
+    if result.initial_report is not None:
+        payload["initial_report"] = {
+            "node": result.initial_report.get("node"),
+            "lxc_count": len(result.initial_report.get("lxc") or []),
+            "warden_version": result.initial_report.get("warden_version"),
+        }
+    print(json.dumps(payload, indent=2))
     return 0
 
 
@@ -107,6 +111,52 @@ def cmd_collect(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_update(args: argparse.Namespace) -> int:
+    from services.node_inventory import NodeInventory
+    from services.ssh_transport import ParamikoSSH
+    from services.warden_setup import UpdateError, update_warden_binary
+
+    data = _data_dir()
+    inv = NodeInventory(data)
+    keys_dir = data / "ssh"
+
+    if args.all:
+        targets = [n.node for n in inv.list_nodes()]
+        if not targets:
+            print("error: no enrolled nodes", file=sys.stderr)
+            return 1
+    else:
+        targets = [args.node]
+
+    results = []
+    rc = 0
+    for node in targets:
+        transport = ParamikoSSH()
+        try:
+            result = update_warden_binary(
+                node,
+                inventory=inv,
+                keys_dir=keys_dir,
+                transport=transport,
+            )
+            results.append(
+                {
+                    "success": True,
+                    "node": result.node,
+                    "warden_version": result.warden_version,
+                    "message": result.message,
+                }
+            )
+        except UpdateError as exc:
+            rc = 1
+            results.append({"success": False, "node": node, "error": str(exc)})
+        finally:
+            transport.close()
+
+    print(json.dumps({"results": results}, indent=2))
+    return rc
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="cluster",
@@ -124,6 +174,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Read password from stdin (never stored)",
     )
+    s.add_argument(
+        "--no-collect",
+        action="store_true",
+        help="Skip initial collect after enroll (default: collect once)",
+    )
     s.set_defaults(func=cmd_setup)
 
     n = sub.add_parser("nodes", help="List enrolled Warden nodes")
@@ -132,6 +187,12 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("collect", help="Pull a visibility report via the Warden bridge")
     c.add_argument("--node", required=True, help="Enrolled node name")
     c.set_defaults(func=cmd_collect)
+
+    u = sub.add_parser("update", help="Push rebuilt bridge binary via enrolled SSH key")
+    u_group = u.add_mutually_exclusive_group(required=True)
+    u_group.add_argument("--node", help="Enrolled node name")
+    u_group.add_argument("--all", action="store_true", help="Update every enrolled node")
+    u.set_defaults(func=cmd_update)
 
     return p
 

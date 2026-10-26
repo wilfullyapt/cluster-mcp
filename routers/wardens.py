@@ -286,3 +286,41 @@ def list_enrolled_nodes() -> ActionResponse:
         for n in get_inventory().list_nodes()
     ]
     return ActionResponse(success=True, data={"nodes": rows})
+
+
+@router.post("/nodes/{node}/update", response_model=ActionResponse)
+def update_node_bridge(node: str) -> ActionResponse:
+    """Push the MCP host's built bridge binary to an enrolled node (SSH key, no password)."""
+    try:
+        node = _safe_node_name(node)
+    except ValueError as exc:
+        return ActionResponse(success=False, error=str(exc))
+
+    from services.node_inventory import get_inventory
+    from services.ssh_transport import ParamikoSSH
+    from services.warden_setup import UpdateError, update_warden_binary
+
+    inv = get_inventory()
+    transport = ParamikoSSH()
+    try:
+        result = update_warden_binary(
+            node,
+            inventory=inv,
+            keys_dir=inv.root / "ssh",
+            transport=transport,
+        )
+    except UpdateError as exc:
+        logger.warning("Warden update failed", node=node, error=str(exc))
+        return ActionResponse(success=False, error=str(exc))
+    finally:
+        transport.close()
+
+    return ActionResponse(
+        success=True,
+        data={
+            "node": result.node,
+            "collector_path": result.collector_path,
+            "warden_version": result.warden_version,
+            "message": result.message,
+        },
+    )

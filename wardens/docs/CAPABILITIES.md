@@ -19,9 +19,10 @@ ClusterMCP  schedules intervals / runs; bridge never calls MCP
 
 | Command | Notes |
 |---------|--------|
-| `cluster setup --ip <addr>` | Password prompt/stdin; install bridge; enroll node |
+| `cluster setup --ip <addr>` | Password prompt/stdin; install bridge; enroll; **initial collect by default** |
 | `cluster nodes` | List enrolled inventory |
 | `cluster collect --node <name>` | MCP-initiated pull via bridge |
+| `cluster update --node <name>` / `--all` | Push rebuilt bridge via enrolled key (no password) |
 
 ### ClusterMCP HTTP API
 
@@ -29,6 +30,7 @@ ClusterMCP  schedules intervals / runs; bridge never calls MCP
 |--------|------|--------|
 | `GET` | `/wardens/enrolled` | Inventory from `cluster setup` |
 | `POST` | `/wardens/nodes/{node}/collect` | MCP-initiated collect over SSH bridge |
+| `POST` | `/wardens/nodes/{node}/update` | Push rebuilt bridge binary via enrolled key |
 | `GET` | `/wardens/nodes/{node}/report` | Last stored report |
 | `GET` | `/wardens/reports` | Nodes with a stored report |
 | `GET` | `/wardens/nodes` | Capability summaries (mirrored on enroll) |

@@ -19,6 +19,10 @@ class SetupError(Exception):
     """Node setup failed."""
 
 
+class UpdateError(Exception):
+    """Warden binary update failed."""
+
+
 @dataclass
 class SetupRequest:
     host: str
@@ -26,6 +30,7 @@ class SetupRequest:
     ssh_user: str = "root"
     ssh_port: int = 22
     node: str | None = None  # override hostname -s if set
+    collect_after: bool = True
 
 
 @dataclass
@@ -35,6 +40,16 @@ class SetupResult:
     host: str
     collector_path: str
     key_name: str
+    message: str = ""
+    initial_report: dict | None = None
+
+
+@dataclass
+class UpdateResult:
+    success: bool
+    node: str
+    collector_path: str
+    warden_version: str
     message: str = ""
 
 
@@ -78,9 +93,26 @@ def setup_node(
         password = ""  # noqa: F841
 
     try:
-        return _enroll_connected(request, transport=transport, inventory=inventory, keys_dir=keys_dir)
+        result = _enroll_connected(
+            request, transport=transport, inventory=inventory, keys_dir=keys_dir
+        )
     finally:
         transport.close()
+
+    if request.collect_after:
+        from services.warden_bridge import BridgeError, collect_node
+
+        try:
+            report = collect_node(
+                result.node,
+                inventory=inventory,
+                keys_dir=keys_dir,
+            )
+            result.initial_report = report
+            result.message = f"{result.message}; initial collect ok (lxc={len(report.get('lxc') or [])})"
+        except BridgeError as exc:
+            result.message = f"{result.message}; initial collect failed: {exc}"
+    return result
 
 
 def _enroll_connected(
@@ -191,3 +223,53 @@ def _enroll_connected(
         key_name=key_name,
         message=f"enrolled {hostname} ({pve_out.strip().splitlines()[0] if pve_out.strip() else 'pve'})",
     )
+
+
+def update_warden_binary(
+    node: str,
+    *,
+    inventory: NodeInventory,
+    keys_dir: Path,
+    transport: SSHTransport,
+    version: str = WARDEN_VERSION,
+) -> UpdateResult:
+    """Push a freshly built bridge binary using the enrolled SSH key (no password)."""
+    rec = inventory.get(node)
+    if rec is None:
+        raise UpdateError(f"node not enrolled: {node}")
+
+    key_path = keys_dir / rec.key_name
+    if not key_path.is_file():
+        raise UpdateError(f"SSH private key missing for {node}: {key_path}")
+
+    local_bin = _local_collector_bin()
+    if not local_bin.is_file():
+        raise UpdateError(
+            f"collector binary not found at {local_bin}; build with: make -C wardens/build collector"
+        )
+
+    owns = not getattr(transport, "connected", False)
+    try:
+        if owns:
+            transport.connect_key(rec.host, rec.ssh_user, key_path, port=rec.ssh_port)
+        transport.run("install -d /opt/wardens/bin /etc/wardens")
+        transport.write_file(rec.collector_path, local_bin.read_bytes(), mode=0o755)
+        code, _, _ = transport.run(f"test -x {rec.collector_path}")
+        if code != 0:
+            raise UpdateError("collector binary not executable on remote after update")
+
+        env_body = f"WARDEN_NODE={rec.node}\nWARDEN_VERSION={version}\n"
+        transport.write_file("/etc/wardens/collector.env", env_body.encode(), mode=0o644)
+
+        rec.warden_version = version
+        inventory.save(rec)
+        return UpdateResult(
+            success=True,
+            node=rec.node,
+            collector_path=rec.collector_path,
+            warden_version=version,
+            message=f"updated bridge on {rec.node} to {version}",
+        )
+    finally:
+        if owns:
+            transport.close()

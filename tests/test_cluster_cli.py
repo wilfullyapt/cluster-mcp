@@ -39,6 +39,7 @@ def test_cluster_setup_cli_password_stdin(data_dir: Path, capsys: pytest.Capture
         port=22,
         node=None,
         password_stdin=True,
+        no_collect=True,
     )
     with (
         patch("services.warden_setup.setup_node", return_value=fake_result) as m,
