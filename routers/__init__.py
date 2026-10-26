@@ -1,1 +1,1 @@
-"""Router package for Proxmox MCP (modular, priv-aware)."""
+"""Router package for ClusterMCP (modular, priv-aware)."""

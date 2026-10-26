@@ -1,0 +1,18 @@
+[Unit]
+Description=ClusterMCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/clustermcp
+EnvironmentFile=/opt/clustermcp/.env
+ExecStart=/opt/clustermcp/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+ExecStopPost=/opt/clustermcp/scripts/rollback-on-failure.sh
+Restart=always
+RestartSec=5
+WatchdogSec=30s
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

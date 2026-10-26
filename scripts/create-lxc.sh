@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Stronghold Proxmox MCP — LXC deployment helper
+# Stronghold ClusterMCP — LXC deployment helper
 # Run on pve-01 (or any node) as root.
 # This is a starting point — review and customize storage/network before running.
 
 set -euo pipefail
 
 CTID=210          # Choose an unused CTID
-HOSTNAME=proxmox-mcp
+HOSTNAME=clustermcp
 STORAGE=local-lvm # or local-zfs, cephfs, etc.
 BRIDGE=vmbr0
 IP="YOUR_LAN_IP/24"   # Static IP — adjust to your LAN
 GATEWAY="YOUR_GATEWAY"
 
-echo "Creating Debian 12 LXC for Proxmox MCP Server (CTID $CTID)..."
+echo "Creating Debian 12 LXC for ClusterMCP Server (CTID $CTID)..."
 
 # Download template if needed (Debian 12)
 pveam update || true

@@ -1,11 +1,42 @@
-# Stronghold Proxmox MCP Server
+# Stronghold ClusterMCP Server
 
 Self-contained, repeatable-tools server for Hermes butler access to Proxmox cluster, VMs/LXCs, Ceph, network inventory, tasks, and health snapshots.
+
+## Identity
+
+| Layer | Canonical name |
+|-------|----------------|
+| Product / package (`pyproject.toml`) | **ClusterMCP** / `clustermcp` |
+| Local checkout (seneschal) | `/root/seneschal/repos/clustermcp` |
+| Deploy path (LXC) | `/opt/clustermcp` · unit `clustermcp.service` |
+| Docker image / compose | `clustermcp:test` · service `clustermcp` |
+| GitHub | `wilfullyapt/cluster-mcp` |
+
+Keep origin as clean HTTPS (never embed PATs). Clone into `/opt/clustermcp`.
 
 **Philosophy**
 - MCP = repeatable queries and status tools (Ceph health, cluster overview, IP inventory, recent tasks, aggregated snapshots).
 - Finite/one-off work (new VM/LXC creation, interactive setup) stays on the SSH path.
 - Dogfood for Stronghold → extractable OpenKEEP template.
+- **Wardens** = per-node C binaries on Proxmox hosts (not a PVE UI add-on) for host-local visibility; see `wardens/docs/`.
+
+## Wardens (node bridge — MCP control plane)
+
+Nested SoR: `wardens/`. **ClusterMCP initiates** setup and collection. The on-node
+binary is a bridge (stdout JSON over SSH) — it does not call MCP and has no MCP URL.
+
+```bash
+make -C wardens/build collector
+cluster setup --ip <node-ip>          # password prompted; never stored
+cluster collect --node <hostname>
+# HTTP: POST /wardens/nodes/{node}/collect
+```
+
+- Capabilities: `wardens/docs/CAPABILITIES.md`
+- Install / enroll: `wardens/docs/INSTALL-NODE.md`
+
+Runner remains a non-functional skeleton — do not enable on nodes.
+
 
 ## Quick Deploy (LXC Recommended — Current Setup)
 
@@ -19,9 +50,9 @@ Use or adapt `scripts/create-lxc.sh` (update IP to YOUR_MCP_LXC_IP/24, CTID, sto
 # Install deps
 apt update && apt install -y python3 python3-venv python3-pip git curl
 
-# Clone (after repo is public/pushed)
-git clone https://github.com/wilfullyapt/proxmox-mcp.git /opt/proxmox-mcp
-cd /opt/proxmox-mcp
+# Clone
+git clone https://github.com/wilfullyapt/cluster-mcp.git /opt/clustermcp
+cd /opt/clustermcp
 
 # Setup
 cp .env.example .env
@@ -38,12 +69,12 @@ See `references/systemd-unit.md` for the unit file.
 
 ```bash
 # Copy and enable
-sudo cp references/systemd-unit.md /etc/systemd/system/proxmox-mcp.service
+sudo cp references/systemd-unit.md /etc/systemd/system/clustermcp.service
 # (or paste the [Unit] content directly)
 sudo systemctl daemon-reload
-sudo systemctl enable --now proxmox-mcp
-sudo systemctl status proxmox-mcp
-journalctl -u proxmox-mcp -f
+sudo systemctl enable --now clustermcp
+sudo systemctl status clustermcp
+journalctl -u clustermcp -f
 ```
 
 `Restart=always` ensures recovery on crash or reboot.
@@ -57,12 +88,12 @@ Minimal role + ACL at `/` is required for cluster-wide endpoints. Current token 
 After initial clone and service setup:
 
 ```bash
-cd /opt/proxmox-mcp && ./scripts/update.sh
+cd /opt/clustermcp && ./scripts/update.sh
 ```
 
 Or directly:
 ```bash
-cd /opt/proxmox-mcp && git pull && sudo systemctl restart proxmox-mcp
+cd /opt/clustermcp && git pull && sudo systemctl restart clustermcp
 ```
 
 This pulls latest, rebuilds if Docker, or restarts the systemd service. Run inside the LXC.
@@ -83,7 +114,8 @@ docker compose up -d --build
 - `GET /resources?type=vm|container|storage`
 - `GET /tasks/recent`
 - `GET /health/snapshot` ← aggregated report
-- `GET /report/visibility` ← rich per-node inventory, Ceph PG/OSD health, warnings, Markdown sections + graph-friendly data for Discord/Hermes
+- `GET /report/visibility` ← rich per-node inventory, Ceph PG/OSD health, warnings, Markdown sections + graph-friendly data for Discord/Hermes (live probes only)
+- `GET /report/visibility.png` ← single PNG status card from the same live probes (no recalled metrics)
 - `POST /admin/update` (self-update endpoint for autonomous maintenance)
 - `POST /vm/{node}/{vmid}/status/{start|stop|reboot|shutdown}` (gated)
 
@@ -92,17 +124,24 @@ All return `ActionResponse {success, data, error}`. PVE calls use the configured
 
 ## Visibility Reports (feature/stronghold-mcp-visibility-report)
 
-**`/report/visibility`** returns rich aggregated data optimized for Discord embeds and Hermes digests:
+**`/report/visibility`** returns rich aggregated data optimized for Discord embeds and Hermes digests.
+**`/report/visibility.png`** returns one PNG card with the same facts.
+
+Data policy: **live probes only**. Missing Ceph OSD detail is omitted or warned — never filled from memory or hardcoded fixtures.
 
 - Per-node inventory (status, CPU/mem, VM/CT counts, uptime)
-- Resource summary by type
+- Container inventory from `cluster/resources`
+- Resource summary by type + storage status rows
 - Ceph health + PG state counts (graph data)
-- OSD summary (up/down/in/out)
-- Actionable warnings list
+- OSD summary (up/down/in/out) from live status/tree; per-OSD rows only when the OSD tree probe returns them
+- Actionable warnings list (including probe errors)
 - Pre-formatted Markdown tables/sections for immediate posting
 - Raw graph payloads (pg_states, node metrics)
 
-Example usage in Hermes: call and render the `markdown` or `summary` sections.
+Example usage in Hermes:
+- JSON: `GET /report/visibility` → use `summary` / `markdown` / `containers`
+- Image: `GET /report/visibility.png` → post the PNG as the Discord report
+- Offline render against a running MCP: `python3 scripts/render_visibility_report.py --base-url http://<mcp>:8000 --out report.png`
 
 **Full Working Surface (current endpoints + privs)**:
 - `/health`, `/cluster/status`, `/nodes`, `/resources`, `/ceph/status`, `/ceph/osds`, `/tasks/recent`, `/health/snapshot`, `/report/visibility`: Read (Sys.Audit, Datastore.Audit, etc.)

@@ -1,4 +1,4 @@
-"""Admin / self-maintenance router for the Proxmox MCP.
+"""Admin / self-maintenance router for the ClusterMCP.
 
 Thin HTTP layer that delegates to UpdateOrchestrator.
 """

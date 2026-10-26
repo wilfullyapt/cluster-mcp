@@ -1,4 +1,4 @@
-"""Structured logging for Proxmox MCP (production ready)."""
+"""Structured logging for ClusterMCP (production ready)."""
 
 import logging
 import os
@@ -56,7 +56,7 @@ def configure_logging():
     )
 
 
-def get_logger(name: str = "proxmox-mcp"):
+def get_logger(name: str = "clustermcp"):
     return structlog.get_logger(name)
 
 

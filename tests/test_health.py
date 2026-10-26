@@ -1,4 +1,4 @@
-"""Basic tests for Proxmox MCP."""
+"""Basic tests for ClusterMCP."""
 
 from fastapi.testclient import TestClient
 

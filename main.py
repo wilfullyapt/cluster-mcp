@@ -1,5 +1,5 @@
 """
-Proxmox MCP Server — Repeatable, priv-aware tools for Proxmox clusters.
+ClusterMCP Server — Repeatable, priv-aware tools for Proxmox clusters.
 Self-contained, deployable as LXC or Docker.
 Focus: status, reports, queries, routine maintenance (Ceph, cluster, network, tasks).
 Finite/one-off work stays on SSH path.
@@ -17,7 +17,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from logging_config import configure_logging, get_logger, request_id_middleware
 from models import ActionResponse
-from routers import admin, capabilities, ceph, cluster, logs, lxc, report
+from routers import admin, capabilities, ceph, cluster, logs, lxc, report, wardens
 from routers.logs import setup_self_logging
 from security import add_rate_limiting, get_api_key
 
@@ -27,7 +27,7 @@ setup_self_logging()
 logger = get_logger()
 
 app = FastAPI(
-    title="Proxmox MCP Server",
+    title="ClusterMCP Server",
     version="0.8.0-dev",
     description=(
         "Priv-aware, repeatable tools: cluster status, Ceph, LXC/VM management, "
@@ -61,6 +61,7 @@ app.include_router(ceph.router)
 app.include_router(logs.router)
 app.include_router(admin.router)
 app.include_router(report.router)
+app.include_router(wardens.router)
 
 # Optional API key protection on all routes (if MCP_API_KEY is set)
 @app.middleware("http")

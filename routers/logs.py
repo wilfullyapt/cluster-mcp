@@ -52,7 +52,7 @@ def health_with_logs():
 def journal_logs(lines: int = Query(50, ge=1, le=200)):
     try:
         result = subprocess.run(
-            ["journalctl", "-u", "proxmox-mcp", "-n", str(lines), "--no-pager"],
+            ["journalctl", "-u", "clustermcp", "-n", str(lines), "--no-pager"],
             capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:

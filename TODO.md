@@ -1,4 +1,4 @@
-# Proxmox MCP TODOs — Building Out API-Controlled Systems
+# ClusterMCP TODOs — Building Out API-Controlled Systems
 
 This MCP provides repeatable, auditable access to Proxmox systems. Future expansions should stay read-heavy for status/automation while gating write actions.
 
@@ -61,7 +61,7 @@ Observed via direct HTTP probes against running LXC (192.168.0.233:8000) against
 
 ### Suggested Improvements (beyond existing TODO)
 - Add robust error handling + structured PVE error mapping (currently some bare 403/501 leak).
-- Enhance logging_config for self-monitoring (as per stronghold-proxmox-mcp skill).
+- Enhance logging_config for self-monitoring (as per stronghold-clustermcp skill).
 - Update OpenAPI/models to prevent validation failures on real responses.
 - Add integration test or smoke test against live token (with read-only ACL).
 - Once ACL fixed, expand snapshot to include more metrics.
@@ -98,5 +98,9 @@ This enables Hermes to keep the MCP current autonomously.
 - [x] /lxc/reverse-proxy-template already present and documented; leveraged in visibility flows
 - [x] Updated with 2026-09-04 probe findings + new visibility implementation notes
 - [x] Delivered: /report/visibility returns structured + markdown + raw_graph_data
+- [x] Live-only rebuild: visibility builder + `/report/visibility.png` single image card
+- [x] Removed fabricated Ceph OSD/status fallbacks from CephClient (empty/error instead of fake rows)
+- [x] `scripts/render_visibility_report.py` for ops-side PNG from live MCP HTTP probes
+- [ ] Deploy updated ClusterMCP LXC so production serves `/report/visibility.png` (Pillow dep + restart)
 
 **Philosophy reminder**: All new work stays read-audit first; write actions remain gated.

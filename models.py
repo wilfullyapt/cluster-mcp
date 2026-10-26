@@ -1,4 +1,4 @@
-"""Pydantic models for Proxmox MCP (priv-aware, validated)."""
+"""Pydantic models for ClusterMCP (priv-aware, validated)."""
 
 from typing import Any
 

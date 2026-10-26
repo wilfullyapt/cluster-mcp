@@ -30,3 +30,13 @@ env/
 .DS_Store
 *.log
 *.bak
+.pytest_cache/
+.ruff_cache/
+coverage.xml
+.coverage
+htmlcov/
+# Wardens local build artifacts (keep Makefile)
+wardens/build/collector
+wardens/build/runner
+# Local wardens data store during dev
+.wardens-data/

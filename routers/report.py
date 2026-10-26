@@ -1,195 +1,192 @@
 """Visibility report router for Stronghold / Discord integration.
 
-Provides rich, aggregated, graph-friendly data for on-demand reports.
-Focus: per-node inventory, cluster resources, Ceph health/PG/OSD summaries, warnings.
-Target: reusable Markdown/JSON generator consumable by Hermes/Discord.
+Live PVE/Ceph probes only — no recalled or fabricated metrics.
+JSON + single PNG image card for Discord/Hermes.
 """
 
+from __future__ import annotations
+
 import os
-from collections import Counter, defaultdict
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from logging_config import get_logger
 from models import ActionResponse
 from pve_client import get_session
+from services.ceph_service import CephService
+from services.visibility_builder import build_visibility_report
+from services.visibility_image import render_visibility_image
 
 router = APIRouter(prefix="/report", tags=["Report"])
 
 
-def _safe_get(url: str) -> dict[str, Any] | None:
-    """Safe PVE GET with error logging."""
+def _pve_host() -> str:
+    return os.getenv("PVE_HOST", "https://pve-01:8006").rstrip("/")
+
+
+def _safe_get(path: str) -> tuple[Any | None, str | None]:
+    """Safe PVE GET. Returns (data, error)."""
     try:
         sess = get_session()
-        r = sess.get(f"{os.getenv('PVE_HOST', 'https://pve-01:8006')}{url}")
+        r = sess.get(f"{_pve_host()}{path}", timeout=30)
         r.raise_for_status()
-        return r.json().get("data")
-    except Exception:
+        payload = r.json()
+        return payload.get("data"), None
+    except Exception as exc:  # noqa: BLE001 — probe boundary
         logger = get_logger()
-        logger.exception(f"Failed to fetch {url}")
-        return None
+        logger.exception("Failed to fetch %s", path)
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _mcp_health_snapshot() -> dict[str, Any] | None:
+    """Best-effort local health fields without circular HTTP."""
+    try:
+        import subprocess
+        from pathlib import Path
+
+        cwd = Path(__file__).resolve().parents[1]
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=cwd, text=True, timeout=5
+        ).strip()
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, text=True, timeout=5
+        ).strip()
+        dirty = (
+            subprocess.run(["git", "diff", "--quiet"], cwd=cwd, capture_output=True, timeout=5).returncode
+            != 0
+        )
+        return {
+            "status": "ok",
+            "version": os.getenv("CLUSTERMCP_VERSION", "0.8.0-dev"),
+            "commit": commit,
+            "branch": branch,
+            "dirty": dirty,
+            "pve_host": _pve_host(),
+        }
+    except Exception:  # noqa: BLE001
+        return {"status": "ok", "version": os.getenv("CLUSTERMCP_VERSION", "0.8.0-dev"), "pve_host": _pve_host()}
+
+
+def collect_visibility_report(
+    include_graph_data: bool = True,
+    node_filter: str | None = None,
+) -> dict[str, Any]:
+    """Gather live probes and build the visibility report dict."""
+    probe_errors: dict[str, str] = {}
+
+    nodes, err = _safe_get("/api2/json/nodes")
+    if err:
+        probe_errors["nodes"] = err
+        nodes = []
+
+    resources, err = _safe_get("/api2/json/cluster/resources")
+    if err:
+        probe_errors["resources"] = err
+        resources = []
+
+    cluster_status, err = _safe_get("/api2/json/cluster/status")
+    if err:
+        probe_errors["cluster_status"] = err
+        cluster_status = []
+
+    # Prefer CephService (normalized) but keep raw tree attempts for OSD detail
+    ceph_status: dict[str, Any] = {}
+    ceph_osds_raw: Any = None
+    try:
+        svc = CephService()
+        try:
+            ceph_status = svc.get_status() or {}
+        except Exception as exc:  # noqa: BLE001
+            probe_errors["ceph_status"] = f"{type(exc).__name__}: {exc}"
+            raw_status, err = _safe_get("/api2/json/cluster/ceph/status")
+            if err:
+                probe_errors["ceph_status_raw"] = err
+            else:
+                ceph_status = raw_status or {}
+        try:
+            ceph_osds_raw = svc.get_osds()
+        except Exception as exc:  # noqa: BLE001
+            probe_errors["ceph_osds"] = f"{type(exc).__name__}: {exc}"
+            ceph_osds_raw = None
+    except Exception as exc:  # noqa: BLE001
+        probe_errors["ceph_service"] = f"{type(exc).__name__}: {exc}"
+        raw_status, err = _safe_get("/api2/json/cluster/ceph/status")
+        if err:
+            probe_errors["ceph_status"] = err
+        else:
+            ceph_status = raw_status or {}
+        raw_osds, err = _safe_get("/api2/json/cluster/ceph/osd")
+        if err:
+            probe_errors["ceph_osds"] = err
+        else:
+            ceph_osds_raw = raw_osds
+
+    # Always try raw node OSD trees to recover detail when service list is empty
+    if not ceph_osds_raw:
+        tree_bits: list[Any] = []
+        node_names = []
+        if isinstance(nodes, list):
+            node_names = [n.get("node") for n in nodes if n.get("node")]
+        if not node_names and isinstance(cluster_status, list):
+            node_names = [n.get("name") for n in cluster_status if n.get("type") == "node" and n.get("name")]
+        for name in node_names:
+            raw, err = _safe_get(f"/api2/json/nodes/{name}/ceph/osd")
+            if err:
+                probe_errors[f"ceph_osds_{name}"] = err
+            elif raw is not None:
+                tree_bits.append({"node": name, "data": raw})
+        if tree_bits:
+            ceph_osds_raw = tree_bits
+
+    return build_visibility_report(
+        nodes=nodes if isinstance(nodes, list) else [],
+        resources=resources if isinstance(resources, list) else [],
+        cluster_status=cluster_status if isinstance(cluster_status, list | dict) else [],
+        ceph_status=ceph_status if isinstance(ceph_status, dict) else {},
+        ceph_osds_raw=ceph_osds_raw,
+        mcp_health=_mcp_health_snapshot(),
+        node_filter=node_filter,
+        include_graph_data=include_graph_data,
+        probe_errors=probe_errors,
+    )
 
 
 @router.get("/visibility", response_model=ActionResponse)
 def visibility_report(include_graph_data: bool = True, node_filter: str | None = None):
     """
-    Generate comprehensive visibility report for Stronghold cluster.
+    Generate comprehensive visibility report for Stronghold cluster from live probes.
 
-    Aggregates:
-    - Per-node status + inventory
-    - Cluster resources summary (VMs, containers, storage)
-    - Ceph health, PG states (graph-friendly counts), OSD health
-    - Actionable warnings
-    - Markdown-ready sections for Discord
-
-    Returns structured data + optional raw graph payloads.
+    Returns structured data + Markdown sections. Does not invent missing metrics.
     """
     logger = get_logger()
     logger.info("Generating visibility report")
-
     try:
-        # Core fetches
-        nodes = _safe_get("/api2/json/nodes") or []
-        resources = _safe_get("/api2/json/cluster/resources") or []
-        ceph_status = _safe_get("/api2/json/cluster/ceph/status") or {}
-        ceph_osds = _safe_get("/api2/json/cluster/ceph/osd") or []
-
-        # Filter nodes if requested
-        if node_filter:
-            nodes = [n for n in nodes if n.get("node") == node_filter]
-            resources = [r for r in resources if r.get("node") == node_filter]
-
-        # Per-node inventory summary
-        node_inventory = []
-        for node in nodes:
-            node_name = node.get("node", "unknown")
-            node_resources = [r for r in resources if r.get("node") == node_name]
-            vms = [r for r in node_resources if r.get("type") == "qemu"]
-            containers = [r for r in node_resources if r.get("type") == "lxc"]
-            storages = [r for r in node_resources if r.get("type") == "storage"]
-
-            node_inventory.append({
-                "node": node_name,
-                "status": node.get("status", "unknown"),
-                "cpu": node.get("cpu", 0),
-                "mem": {"used": node.get("mem", 0), "total": node.get("maxmem", 0)},
-                "vms_count": len(vms),
-                "containers_count": len(containers),
-                "storage_count": len(storages),
-                "uptime": node.get("uptime", 0),
-            })
-
-        # Resources summary (by type)
-        resource_summary = {
-            "total": len(resources),
-            "by_type": dict(Counter(r.get("type") for r in resources if r.get("type"))),
-            "vms": len([r for r in resources if r.get("type") == "qemu"]),
-            "containers": len([r for r in resources if r.get("type") == "lxc"]),
-            "storage": len([r for r in resources if r.get("type") == "storage"]),
-        }
-
-        # Ceph summaries (graph-friendly)
-        ceph_health = ceph_status.get("health", {})
-        pg_states_raw = ceph_status.get("pgmap", {}).get("pgs_by_state", []) or []
-        pg_state_counts = defaultdict(int)
-        for pg in pg_states_raw:
-            state = pg.get("state_name", "unknown")
-            count = pg.get("count", 0)
-            pg_state_counts[state] += count
-
-        osd_summary = {
-            "total": len(ceph_osds),
-            "up": sum(1 for o in ceph_osds if o.get("status") == "up"),
-            "down": sum(1 for o in ceph_osds if o.get("status") != "up"),
-            "in": sum(1 for o in ceph_osds if o.get("in") == 1),
-            "out": sum(1 for o in ceph_osds if o.get("in") != 1),
-        }
-
-        # Warnings
-        warnings = []
-        if ceph_health.get("status") != "HEALTH_OK":
-            warnings.append(f"Ceph health: {ceph_health.get('status', 'unknown')}")
-        if osd_summary["down"] > 0:
-            warnings.append(f"{osd_summary['down']} OSD(s) down")
-        degraded_pgs = sum(v for k, v in pg_state_counts.items() if "degraded" in k.lower() or "incomplete" in k.lower())
-        if degraded_pgs > 0:
-            warnings.append(f"{degraded_pgs} degraded/incomplete PGs")
-        offline_nodes = [n["node"] for n in node_inventory if n["status"] != "online"]
-        if offline_nodes:
-            warnings.append(f"Offline nodes: {', '.join(offline_nodes)}")
-
-        # Markdown-ready sections (for Discord/Hermes)
-        md_sections = {
-            "nodes_table": _nodes_to_md(node_inventory),
-            "resources_summary": _resources_to_md(resource_summary),
-            "ceph_summary": _ceph_to_md(ceph_health, pg_state_counts, osd_summary),
-            "warnings": "\n".join(f"- {w}" for w in warnings) if warnings else "No critical warnings.",
-        }
-
-        report_data = {
-            "summary": {
-                "nodes_online": len([n for n in node_inventory if n["status"] == "online"]),
-                "total_nodes": len(node_inventory),
-                "total_vms": resource_summary["vms"],
-                "total_containers": resource_summary["containers"],
-                "ceph_health": ceph_health.get("status", "unknown"),
-                "warnings_count": len(warnings),
-            },
-            "node_inventory": node_inventory,
-            "resource_summary": resource_summary,
-            "ceph": {
-                "health": ceph_health,
-                "pg_states": dict(pg_state_counts),  # graph-friendly
-                "osd_summary": osd_summary,
-            },
-            "warnings": warnings,
-            "markdown": md_sections,  # ready for Discord embed
-            "raw_graph_data": {
-                "pg_states": dict(pg_state_counts),
-                "osd_health": osd_summary,
-                "node_cpu_mem": {n["node"]: {"cpu": n["cpu"], "mem_used": n["mem"]["used"]} for n in node_inventory},
-            } if include_graph_data else None,
-        }
-
+        report_data = collect_visibility_report(
+            include_graph_data=include_graph_data,
+            node_filter=node_filter,
+        )
         return ActionResponse(success=True, data=report_data)
-
     except Exception:
         logger.exception("Visibility report generation failed")
-        raise HTTPException(500, detail="Failed to generate visibility report")
+        raise HTTPException(500, detail="Failed to generate visibility report") from None
 
 
-def _nodes_to_md(nodes: list[dict]) -> str:
-    """Simple Markdown table for nodes."""
-    if not nodes:
-        return "No nodes."
-    header = (
-        "| Node | Status | CPU | Mem Used/Total | VMs | CTs | Storage | Uptime |\n"
-        "|------|--------|-----|----------------|-----|-----|---------|--------|\n"
-    )
-    rows = []
-    for n in nodes:
-        mem = f"{n['mem']['used']}/{n['mem']['total']}"
-        row = (
-            f"| {n['node']} | {n['status']} | {n['cpu']:.1%} | {mem} | "
-            f"{n['vms_count']} | {n['containers_count']} | {n['storage_count']} | {n['uptime']} |"
-        )
-        rows.append(row)
-    return header + "\n".join(rows)
-
-
-def _resources_to_md(summary: dict) -> str:
-    return (
-        f"**Resources**: {summary['total']} total | "
-        f"VMs: {summary['vms']} | Containers: {summary['containers']} | "
-        f"Storage: {summary['storage']} "
-    )
-
-
-def _ceph_to_md(health: dict, pg_states: dict, osd: dict) -> str:
-    pg_str = ", ".join(f"{k}: {v}" for k, v in sorted(pg_states.items(), key=lambda x: -x[1])[:5])
-    return (
-        f"**Ceph Health**: {health.get('status', 'unknown')}\n"
-        f"**PG States** (top): {pg_str}\n"
-        f"**OSDs**: {osd['total']} total | Up: {osd['up']} | Down: {osd['down']} | In: {osd['in']} | Out: {osd['out']}"
-    )
+@router.get("/visibility.png")
+def visibility_report_image(node_filter: str | None = None):
+    """Single PNG status card built only from live visibility probes."""
+    logger = get_logger()
+    logger.info("Generating visibility report image")
+    try:
+        report_data = collect_visibility_report(include_graph_data=False, node_filter=node_filter)
+        png = render_visibility_image(report_data)
+        headers = {
+            "Cache-Control": "no-store",
+            "X-ClusterMCP-Report-Generated-At": str(report_data.get("generated_at", "")),
+            "X-ClusterMCP-Report-Overall": str(report_data.get("overall", "")),
+            "X-ClusterMCP-Data-Policy": "live_probes_only",
+        }
+        return Response(content=png, media_type="image/png", headers=headers)
+    except Exception:
+        logger.exception("Visibility report image generation failed")
+        raise HTTPException(500, detail="Failed to generate visibility report image") from None

@@ -1,0 +1,12 @@
+# DEPRECATED — node-side push timer (control plane owns intervals)
+[Unit]
+Description=DEPRECATED Run Wardens collector every 5 minutes (do not enable)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=1min
+Unit=wardens-collector.service
+
+[Install]
+WantedBy=timers.target
