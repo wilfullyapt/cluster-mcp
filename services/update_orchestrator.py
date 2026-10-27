@@ -153,7 +153,7 @@ class UpdateOrchestrator:
 
         # Success - optional fleet-sync before restart (same process still alive)
         fleet_msg = ""
-        if os.getenv("FLEET_SYNC_ON_OTA", "true").strip().lower() in ("1", "true", "yes"):
+        if os.getenv("FLEET_SYNC_ON_OTA", "false").strip().lower() in ("1", "true", "yes"):
             try:
                 from services.warden_fleet import FleetSyncError, fleet_sync
                 from services.warden_setup import WARDEN_VERSION
