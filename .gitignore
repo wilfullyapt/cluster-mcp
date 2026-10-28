@@ -40,3 +40,5 @@ wardens/build/collector
 wardens/build/runner
 # Local wardens data store during dev
 .wardens-data/
+# Agent/local git worktrees (never commit)
+.worktrees/
