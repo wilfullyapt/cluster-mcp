@@ -266,23 +266,45 @@ def update_warden_binary(
         if owns:
             transport.connect_key(rec.host, rec.ssh_user, key_path, port=rec.ssh_port)
 
-        from services.warden_ssh_policy import install_binary_remote_command
+        from services.warden_ssh_policy import WRAPPER_REMOTE, install_binary_remote_command
 
         payload = local_bin.read_bytes()
-        # Forced-command path: SSH_ORIGINAL_COMMAND=install-binary, binary on stdin
         run_stdin = getattr(transport, "run_stdin", None)
-        if run_stdin is None:
-            raise UpdateError("transport does not support run_stdin (required for forced-command install)")
-        code, out, err = run_stdin(install_binary_remote_command(), payload)
-        if code != 0:
+        mode = "install-binary"
+        if run_stdin is not None:
+            code, out, err = run_stdin(install_binary_remote_command(), payload)
+        else:
+            code, out, err = 1, "", "no run_stdin"
+
+        # Legacy enrollments: open SSH shell, no forced-command wrapper yet
+        if code != 0 and "command not found" in (err + out).lower():
+            mode = "legacy-sftp"
+            wrapper_src = (
+                Path(__file__).resolve().parent.parent
+                / "wardens"
+                / "docs"
+                / "scripts"
+                / "wardens-ssh-wrapper.sh"
+            )
+            transport.run("install -d /opt/wardens/bin /etc/wardens")
+            if wrapper_src.is_file():
+                transport.write_file(WRAPPER_REMOTE, wrapper_src.read_bytes(), mode=0o755)
+            transport.write_file(rec.collector_path, payload, mode=0o755)
+            code, _, test_err = transport.run(f"test -x {rec.collector_path}")
+            if code != 0:
+                raise UpdateError(
+                    f"legacy install failed on {node}: {test_err.strip()} "
+                    f"(after install-binary rejected: {err.strip() or out.strip()})"
+                )
+            env_body = f"WARDEN_NODE={rec.node}\nWARDEN_VERSION={version}\n"
+            transport.write_file("/etc/wardens/collector.env", env_body.encode(), mode=0o644)
+            out = '{"ok":true,"mode":"legacy-sftp"}'
+        elif code != 0:
             raise UpdateError(
                 f"install-binary failed on {node}: {err.strip() or out.strip()} "
-                "(node may need re-setup for forced-command wrapper)"
+                "(re-run cluster setup --ip <node> once to install forced-command wrapper)"
             )
 
-        # env file cannot be written via forced command — bake version into collect env only
-        # if open shell still available this would work; for forced keys, env is set at setup
-        # and version is in inventory. Optional: extend wrapper to accept set-env later.
         rec.warden_version = version
         inventory.save(rec)
         return UpdateResult(
@@ -290,7 +312,7 @@ def update_warden_binary(
             node=rec.node,
             collector_path=rec.collector_path,
             warden_version=version,
-            message=f"updated bridge on {rec.node} to {version} via install-binary",
+            message=f"updated bridge on {rec.node} to {version} via {mode}",
         )
     finally:
         if owns:

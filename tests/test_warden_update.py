@@ -58,7 +58,22 @@ def test_update_pushes_new_binary_over_key_auth(data_dir: Path) -> None:
     assert ssh.password is None
 
 
-def test_update_unknown_node(data_dir: Path) -> None:
+def test_update_legacy_fallback_when_install_binary_missing(data_dir: Path) -> None:
+    ssh = FakeSSH(host="")
+    ssh.exec_results = {
+        "install-binary": (127, "", "bash: line 1: install-binary: command not found"),
+        "install -d": (0, "", ""),
+        "test -x /opt/wardens/bin/wardens-collector": (0, "", ""),
+    }
+    result = update_warden_binary(
+        "pvenodeone",
+        inventory=NodeInventory(data_dir),
+        keys_dir=data_dir / "ssh",
+        transport=ssh,
+    )
+    assert result.success is True
+    assert "legacy-sftp" in result.message
+    assert ssh.files["/opt/wardens/bin/wardens-collector"].startswith(b"\x7fELF")
     ssh = FakeSSH(host="")
     with pytest.raises(UpdateError, match="not enrolled"):
         update_warden_binary(

@@ -23,7 +23,7 @@
 # On MCP .env
 WARDENS_SSH_FROM=<mcp-lxc-ip-or-cidr>
 WARDENS_COLLECT_INTERVAL_SEC=300
-FLEET_SYNC_ON_OTA=true
+FLEET_SYNC_ON_OTA=false
 
 # Re-enroll existing nodes to install wrapper + forced keys (password once each):
 cluster setup --ip <node>
