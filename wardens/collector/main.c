@@ -5,7 +5,7 @@
  *
  * Config (env):
  *   WARDEN_NODE       required node name (e.g. pvenodeone)
- *   WARDEN_VERSION    default 0.3.0
+ *   WARDEN_VERSION    default 0.5.1
  *
  * stdout: one CollectorReport JSON document
  * stderr: diagnostics only

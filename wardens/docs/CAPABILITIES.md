@@ -80,8 +80,8 @@ Persistence: `WARDENS_DATA_DIR` — `nodes/`, `ssh/`, `capabilities/`, `reports/
   "auth_method": "ssh_key",
   "key_name": "warden-pvenodetwo",
   "collector_path": "/opt/wardens/bin/wardens-collector",
-  "warden_version": "0.4.0",
-  "collector_caps": ["lxc:full", "permissions:audit", "host:summary"]
+  "warden_version": "0.5.1",
+  "collector_caps": ["lxc:full", "permissions:audit", "host:summary", "cephfs:mapping"]
 }
 ```
 
