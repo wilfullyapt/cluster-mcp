@@ -29,6 +29,24 @@ static void clear_lxc(lxc_visibility_t *out, const char *node_name) {
     strncpy(out->status, "unknown", sizeof(out->status) - 1);
 }
 
+static int append_kv(char *dst, size_t dst_sz, const char *key, const char *value) {
+    size_t used = strlen(dst);
+    size_t need = strlen(key) + strlen(value) + 3; /* key=value; */
+    if (used + need >= dst_sz) {
+        return -1;
+    }
+    if (used > 0) {
+        strncat(dst, ";", dst_sz - used - 1);
+        used = strlen(dst);
+    }
+    strncat(dst, key, dst_sz - used - 1);
+    used = strlen(dst);
+    strncat(dst, "=", dst_sz - used - 1);
+    used = strlen(dst);
+    strncat(dst, value, dst_sz - used - 1);
+    return 0;
+}
+
 static int parse_lxc_conf(lxc_visibility_t *out, const char *path, int vmid, const char *node_name) {
     FILE *f;
     char line[512];
@@ -54,20 +72,11 @@ static int parse_lxc_conf(lxc_visibility_t *out, const char *path, int vmid, con
             snprintf(out->hostname, sizeof(out->hostname), "%s", value);
         } else if (strcmp(key, "rootfs") == 0) {
             snprintf(out->rootfs, sizeof(out->rootfs), "%s", value);
-        } else if (strcmp(key, "mp0") == 0 || strncmp(key, "mp", 2) == 0 ||
-                   strcmp(key, "net0") == 0 || strncmp(key, "net", 3) == 0) {
-            size_t used = strlen(out->mounts);
-            if (used + strlen(key) + strlen(value) + 3 < sizeof(out->mounts)) {
-                if (used > 0) {
-                    strncat(out->mounts, ";", sizeof(out->mounts) - used - 1);
-                    used = strlen(out->mounts);
-                }
-                strncat(out->mounts, key, sizeof(out->mounts) - used - 1);
-                used = strlen(out->mounts);
-                strncat(out->mounts, "=", sizeof(out->mounts) - used - 1);
-                used = strlen(out->mounts);
-                strncat(out->mounts, value, sizeof(out->mounts) - used - 1);
-            }
+        } else if (strncmp(key, "net", 3) == 0 && key[3] >= '0' && key[3] <= '9') {
+            /* net0 / net1 — keep separate from mp* mounts */
+            append_kv(out->nets, sizeof(out->nets), key, value);
+        } else if (strncmp(key, "mp", 2) == 0 && key[2] >= '0' && key[2] <= '9') {
+            append_kv(out->mounts, sizeof(out->mounts), key, value);
         } else if (strcmp(key, "unprivileged") == 0) {
             out->unprivileged = (atoi(value) == 1);
         } else if (strcmp(key, "lxc.idmap") == 0 || strcmp(key, "idmap") == 0) {
@@ -84,19 +93,11 @@ static int parse_lxc_conf(lxc_visibility_t *out, const char *path, int vmid, con
             /* conf memory is MiB */
             out->memory_used = (uint64_t)atoll(value) * 1024ULL * 1024ULL;
         } else if (strcmp(key, "ostype") == 0) {
-            /* pack ostype into status prefix if still unknown */
             if (strcmp(out->status, "unknown") == 0) {
                 snprintf(out->status, sizeof(out->status), "ostype:%s", value);
             }
         } else if (strcmp(key, "onboot") == 0) {
-            size_t used = strlen(out->mounts);
-            if (used + 16 < sizeof(out->mounts)) {
-                if (used) {
-                    strncat(out->mounts, ";", sizeof(out->mounts) - used - 1);
-                }
-                strncat(out->mounts, "onboot=", sizeof(out->mounts) - strlen(out->mounts) - 1);
-                strncat(out->mounts, value, sizeof(out->mounts) - strlen(out->mounts) - 1);
-            }
+            append_kv(out->mounts, sizeof(out->mounts), "onboot", value);
         } else if (strcmp(key, "tags") == 0 || strcmp(key, "description") == 0) {
             size_t used = strlen(out->idmap);
             if (used + strlen(key) + strlen(value) + 4 < sizeof(out->idmap)) {
@@ -111,6 +112,52 @@ static int parse_lxc_conf(lxc_visibility_t *out, const char *path, int vmid, con
     }
     fclose(f);
     return 0;
+}
+
+/* Sort + unique by vmid (keeps first rich row). Fixes duplicate VMID rows. */
+static void dedupe_lxc_by_vmid(lxc_visibility_t *arr, size_t *count) {
+    size_t i, j, w = 0;
+    if (!arr || !count || *count == 0) {
+        return;
+    }
+    /* insertion sort by vmid */
+    for (i = 1; i < *count; i++) {
+        lxc_visibility_t key = arr[i];
+        j = i;
+        while (j > 0 && arr[j - 1].vmid > key.vmid) {
+            arr[j] = arr[j - 1];
+            j--;
+        }
+        arr[j] = key;
+    }
+    for (i = 0; i < *count; i++) {
+        if (w > 0 && arr[w - 1].vmid == arr[i].vmid) {
+            /* merge: prefer row with hostname/rootfs/mounts filled */
+            if (arr[w - 1].hostname[0] == '\0' && arr[i].hostname[0] != '\0') {
+                arr[w - 1] = arr[i];
+            } else if (arr[w - 1].rootfs[0] == '\0' && arr[i].rootfs[0] != '\0') {
+                arr[w - 1] = arr[i];
+            } else if (arr[w - 1].mounts[0] == '\0' && arr[i].mounts[0] != '\0') {
+                /* keep nets/mounts from richer row when possible */
+                if (arr[i].nets[0] != '\0' && arr[w - 1].nets[0] == '\0') {
+                    strncpy(arr[w - 1].nets, arr[i].nets, sizeof(arr[w - 1].nets) - 1);
+                }
+                if (arr[i].mounts[0] != '\0') {
+                    strncpy(arr[w - 1].mounts, arr[i].mounts, sizeof(arr[w - 1].mounts) - 1);
+                }
+            } else {
+                if (arr[i].nets[0] != '\0' && arr[w - 1].nets[0] == '\0') {
+                    strncpy(arr[w - 1].nets, arr[i].nets, sizeof(arr[w - 1].nets) - 1);
+                }
+            }
+            continue;
+        }
+        if (w != i) {
+            arr[w] = arr[i];
+        }
+        w++;
+    }
+    *count = w;
 }
 
 int collect_all_lxc(lxc_visibility_t *out, size_t max, size_t *count, const char *node_name) {
@@ -144,6 +191,8 @@ int collect_all_lxc(lxc_visibility_t *out, size_t max, size_t *count, const char
     }
     closedir(dir);
 
+    dedupe_lxc_by_vmid(out, count);
+
     fprintf(stderr, "[collector] LXC visibility: %zu container(s) on node=%s\n", *count, node_name);
 
     /* Enrich status from pct list when available */
@@ -157,10 +206,16 @@ int collect_all_lxc(lxc_visibility_t *out, size_t max, size_t *count, const char
             while (fgets(line, sizeof(line), pf)) {
                 int id = 0;
                 char st[64] = "";
-                if (sscanf(line, "%d %63s", &id, st) >= 2) {
+                char name[128] = "";
+                /* pct list: VMID Status Lock Name */
+                if (sscanf(line, "%d %63s %*s %127s", &id, st, name) >= 2 ||
+                    sscanf(line, "%d %63s", &id, st) >= 2) {
                     for (size_t i = 0; i < *count; i++) {
                         if (out[i].vmid == id) {
                             snprintf(out[i].status, sizeof(out[i].status), "%s", st);
+                            if (out[i].hostname[0] == '\0' && name[0] != '\0') {
+                                snprintf(out[i].hostname, sizeof(out[i].hostname), "%s", name);
+                            }
                         }
                     }
                 }

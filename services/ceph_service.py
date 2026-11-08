@@ -23,7 +23,6 @@ class CephService:
 
     def _check_capability(self, feature: str) -> bool:
         """Placeholder for future integration with /capabilities endpoint."""
-        # In production this would check the token's enabled_features
         allowed = {"read_audit", "storage", "ceph_read"}
         return feature in allowed
 
@@ -57,4 +56,27 @@ class CephService:
             return self.client.get_fs()
         except CephConnectionError as exc:
             logger.error("CephFS query failed: %s", exc)
+            raise
+
+    def list_subvolumes(self, fs_name: str | None = None, group: str | None = None) -> dict[str, Any]:
+        try:
+            return self.client.list_subvolumes(fs_name=fs_name, group=group)
+        except CephConnectionError as exc:
+            logger.error("CephFS subvolume list failed: %s", exc)
+            raise
+
+    def get_subvolume(
+        self, name: str, fs_name: str | None = None, group: str | None = None
+    ) -> dict[str, Any]:
+        try:
+            return self.client.get_subvolume(name=name, fs_name=fs_name, group=group)
+        except CephConnectionError as exc:
+            logger.error("CephFS subvolume info failed: %s", exc)
+            raise
+
+    def list_cephfs_storages(self) -> dict[str, Any]:
+        try:
+            return self.client.list_cephfs_storages()
+        except CephConnectionError as exc:
+            logger.error("CephFS storage list failed: %s", exc)
             raise

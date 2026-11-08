@@ -616,6 +616,12 @@ def _attention_next_steps(warnings: list[str]) -> list[str]:
                 "Next: on pvenodetwo + pvenodethree, fix or remove storage "
                 "`cephfs-immich` (PVE → Datacenter → Storage) until status is available"
             )
+        elif "warden not enrolled" in wl:
+            add(f"Next: enroll missing Warden bridges (`cluster setup`) — {w.split(':',1)[-1].strip()}")
+        elif "warden report missing" in wl:
+            add(f"Next: `cluster collect` (or POST /wardens/nodes/{{n}}/collect) for — {w.split(':',1)[-1].strip()}")
+        elif "warden version drift" in wl:
+            add("Next: rebuild collector + `cluster update --all` so enrolled nodes share one bridge version")
         elif "stripped untrusted" in wl or ("osd" in wl and "fixture" in wl):
             add(
                 "Next: deploy ClusterMCP build with live OSD tree "
@@ -633,7 +639,25 @@ def _attention_next_steps(warnings: list[str]) -> list[str]:
         elif "degraded" in wl or ("incomplete" in wl and "pg" in wl):
             add("Next: run `ceph pg dump_stuck` / check recovering PGs until active+clean")
         elif "probe error" in wl:
-            add(f"Next: restore failing probe path — {w}")
+            if any(
+                x in wl
+                for x in (
+                    "name or service not known",
+                    "failed to resolve",
+                    "getaddrinfo",
+                    "nodename nor servname",
+                )
+            ):
+                add(
+                    "Next: on MCP LXC fix PVE_HOST DNS (resolvable name or IP:8006) "
+                    "and restart clustermcp — plane is blind until then"
+                )
+            elif any(x in wl for x in ("401", "403", "unauthorized", "authentication")):
+                add("Next: repair PVE_TOKEN_ID/PVE_TOKEN_SECRET ACLs on MCP LXC .env (token broken)")
+            elif "timeout" in wl or "connection refused" in wl or "unreachable" in wl:
+                add("Next: restore network path MCP→PVE API (8006) — connection/timeout failures")
+            else:
+                add(f"Next: restore failing probe path — {w}")
         else:
             add(f"Next: {w}")
 
@@ -658,6 +682,7 @@ def _fill_overview(
     *,
     include_footer: bool = True,
     include_ceph: bool = True,
+    include_wardens: bool = True,
     include_attention: bool = False,
 ) -> None:
     overall = str((report.get("summary") or {}).get("overall") or report.get("overall") or "unknown")
@@ -701,6 +726,14 @@ def _fill_overview(
         dirty = "dirty" if mcp.get("dirty") else "clean"
         chips.append(("MCP", f"{mcp.get('version', '—')}@{mcp.get('commit', '—')}", OK if dirty == "clean" else WARN))
         chips.append(("Git", f"{mcp.get('branch', '—')} · {dirty}", OK if dirty == "clean" else WARN))
+    wardens = report.get("wardens") or {}
+    if wardens.get("available"):
+        we = wardens.get("enrolled_count")
+        wx = wardens.get("expected_count")
+        wr = wardens.get("report_count")
+        wv = ",".join(wardens.get("versions") or []) or "—"
+        wcolor = OK if wardens.get("overall") == "ok" else (BAD if wardens.get("overall") == "down" else WARN)
+        chips.append(("Wardens", f"{we}/{wx} enr · {wr} rpt · {wv}", wcolor))
     c.section_header("Summary", label, color, subtitle="Live probe chips")
     c.kv_chips(chips)
     c.gap(28)
@@ -731,6 +764,9 @@ def _fill_overview(
         rows=node_rows,
     )
 
+    if include_wardens:
+        _append_wardens(c, report)
+
     if include_ceph:
         _append_ceph(c, report)
 
@@ -739,6 +775,97 @@ def _fill_overview(
 
     if include_footer:
         c.footer(f"Stronghold · live probes · {width}px · body {c.body_px}px · {page_label}")
+
+
+def _append_wardens(c: _Canvas, report: dict[str, Any]) -> None:
+    wardens = report.get("wardens") or {}
+    if not wardens.get("available"):
+        c.section_header("Wardens", "—", MUTED, subtitle="not probed")
+        c.multiline_rows(
+            [
+                (
+                    "warn",
+                    WARN,
+                    "Wardens not included in this probe set",
+                    "upgrade renderer / MCP report collector to pull /wardens/*",
+                )
+            ],
+            single_line=False,
+        )
+        c.gap(24)
+        return
+
+    overall = str(wardens.get("overall") or "unknown")
+    if overall == "ok":
+        sec_l, sec_c = "OK", OK
+    elif overall == "down":
+        sec_l, sec_c = "DOWN", BAD
+    else:
+        sec_l, sec_c = "WARN", WARN
+    vers = ", ".join(wardens.get("versions") or []) or "—"
+    caps = ", ".join(wardens.get("collector_caps") or []) or "—"
+    c.section_header(
+        "Wardens",
+        sec_l,
+        sec_c,
+        subtitle=f"bridges {wardens.get('enrolled_count')}/{wardens.get('expected_count')} · reports {wardens.get('report_count')}",
+    )
+    c.kv_chips(
+        [
+            ("Enrolled", f"{wardens.get('enrolled_count')}/{wardens.get('expected_count')}", sec_c),
+            (
+                "Reports",
+                str(wardens.get("report_count") if wardens.get("report_count") is not None else "—"),
+                OK if wardens.get("report_count") else WARN,
+            ),
+            ("Version", vers, OK if wardens.get("version_uniform") else WARN),
+            ("Caps", caps, OK if caps != "—" else WARN),
+        ]
+    )
+    wnodes = list(wardens.get("nodes") or [])
+    if wnodes:
+        rows: list[tuple[str, tuple[int, int, int], list[str]]] = []
+        for n in wnodes:
+            st = n.get("status")
+            if st == "ok":
+                sk, sc = "ok", OK
+            elif st == "missing":
+                sk, sc = "bad", BAD
+            else:
+                sk, sc = "warn", WARN
+            caps_s = ",".join(n.get("collector_caps") or []) or "—"
+            if len(caps_s) > 28:
+                caps_s = caps_s[:25] + "…"
+            report_s = "yes" if n.get("has_report") else "no"
+            lxc_s = str(n.get("lxc_count") if n.get("lxc_count") is not None else "—")
+            perm = n.get("permission_readable")
+            perm_s = "rw" if perm is True else ("no" if perm is False else "—")
+            rows.append(
+                (
+                    sk,
+                    sc,
+                    [
+                        str(n.get("node") or "—"),
+                        str(n.get("warden_version") or "—"),
+                        str(n.get("auth_method") or "—"),
+                        report_s,
+                        lxc_s,
+                        perm_s,
+                        caps_s,
+                    ],
+                )
+            )
+        c.table(
+            headers=["Node", "Ver", "Auth", "Report", "LXCs", "Perm", "Caps"],
+            col_weights=[1.4, 0.8, 0.9, 0.8, 0.7, 0.7, 1.6],
+            rows=rows,
+        )
+    else:
+        c.multiline_rows(
+            [("warn", WARN, "No enrolled Wardens", "run cluster setup on each PVE node")],
+            single_line=False,
+        )
+    c.gap(24)
 
 
 def _append_ceph(c: _Canvas, report: dict[str, Any]) -> None:
@@ -864,9 +991,10 @@ def render_visibility_pages(
     _fill_overview(
         c1,
         report,
-        "1/2 · summary · nodes · attention",
+        "1/2 · summary · nodes · wardens · attention",
         include_footer=True,
         include_ceph=False,
+        include_wardens=True,
         include_attention=True,
     )
     pages.append(("01-summary-nodes-attention", _png_bytes(c1.render())))
@@ -907,6 +1035,7 @@ def render_visibility_image(
         "full report",
         include_footer=False,
         include_ceph=True,
+        include_wardens=True,
         include_attention=False,
     )
     _append_containers(c, report)

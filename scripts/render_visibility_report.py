@@ -92,6 +92,49 @@ def main() -> int:
         # We pass osds through; builder marks detail. Ops note added if fixture-like.
         pass
 
+    # Wardens (MCP control plane + last collector reports)
+    wardens_enrolled, err = http_get_json(f"{base}/wardens/enrolled")
+    if err:
+        # Fall back to capability registry if inventory path fails
+        probe_errors["wardens_enrolled"] = err
+        nodes_caps, err2 = http_get_json(f"{base}/wardens/nodes")
+        if err2:
+            probe_errors["wardens_nodes"] = err2
+            wardens_enrolled = None
+        else:
+            wardens_enrolled = nodes_caps
+            probe_errors.pop("wardens_enrolled", None)
+    if isinstance(wardens_enrolled, dict) and "nodes" in wardens_enrolled:
+        # keep full envelope for builder (list or map under nodes)
+        pass
+
+    wardens_reports: dict[str, Any] = {}
+    report_index, err = http_get_json(f"{base}/wardens/reports")
+    if err:
+        probe_errors["wardens_reports"] = err
+        report_names: list[str] = []
+    else:
+        if isinstance(report_index, dict):
+            raw_names = report_index.get("nodes") or []
+            report_names = [str(n) for n in raw_names] if isinstance(raw_names, list) else []
+        elif isinstance(report_index, list):
+            report_names = [str(n) for n in report_index]
+        else:
+            report_names = []
+        # Prefer enrolled names when index empty
+        if not report_names and isinstance(wardens_enrolled, dict):
+            nodes_field = wardens_enrolled.get("nodes")
+            if isinstance(nodes_field, list):
+                report_names = [str(n.get("node")) for n in nodes_field if isinstance(n, dict) and n.get("node")]
+            elif isinstance(nodes_field, dict):
+                report_names = [str(n) for n in nodes_field]
+        for name in report_names:
+            rep, rerr = http_get_json(f"{base}/wardens/nodes/{name}/report")
+            if rerr:
+                probe_errors[f"wardens_report_{name}"] = rerr
+            elif isinstance(rep, dict):
+                wardens_reports[name] = rep
+
     # Prefer node metrics from resources type=node + nodes endpoint
     report = build_visibility_report(
         nodes=nodes if isinstance(nodes, list) else [],
@@ -100,6 +143,8 @@ def main() -> int:
         ceph_status=ceph_status if isinstance(ceph_status, dict) else {},
         ceph_osds_raw=ceph_osds,
         mcp_health=health if isinstance(health, dict) else None,
+        wardens_enrolled=wardens_enrolled if wardens_enrolled is not None else None,
+        wardens_reports=wardens_reports or None,
         include_graph_data=True,
         probe_errors=probe_errors,
     )

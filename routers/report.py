@@ -2,18 +2,21 @@
 
 Live PVE/Ceph probes only — no recalled or fabricated metrics.
 JSON + single PNG image card for Discord/Hermes.
+
+PVE plane failures soft-fail into probe_errors; this route must never kill the
+uvicorn worker (bounded timeouts, JSON on all paths).
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Response
 
+from config import get_pve_host, get_pve_timeout, resolve_app_version
 from logging_config import get_logger
 from models import ActionResponse
-from pve_client import get_session
+from pve_client import pve_get
 from services.ceph_service import CephService
 from services.visibility_builder import build_visibility_report
 from services.visibility_image import render_visibility_image
@@ -21,22 +24,13 @@ from services.visibility_image import render_visibility_image
 router = APIRouter(prefix="/report", tags=["Report"])
 
 
-def _pve_host() -> str:
-    return os.getenv("PVE_HOST", "https://pve-01:8006").rstrip("/")
-
-
 def _safe_get(path: str) -> tuple[Any | None, str | None]:
     """Safe PVE GET. Returns (data, error)."""
-    try:
-        sess = get_session()
-        r = sess.get(f"{_pve_host()}{path}", timeout=30)
-        r.raise_for_status()
-        payload = r.json()
-        return payload.get("data"), None
-    except Exception as exc:  # noqa: BLE001 — probe boundary
+    data, err = pve_get(path, timeout=get_pve_timeout())
+    if err:
         logger = get_logger()
-        logger.exception("Failed to fetch %s", path)
-        return None, f"{type(exc).__name__}: {exc}"
+        logger.warning("Failed to fetch %s: %s", path, err)
+    return data, err
 
 
 def _mcp_health_snapshot() -> dict[str, Any] | None:
@@ -58,107 +52,171 @@ def _mcp_health_snapshot() -> dict[str, Any] | None:
         )
         return {
             "status": "ok",
-            "version": os.getenv("CLUSTERMCP_VERSION", "0.8.0-dev"),
+            "version": resolve_app_version(cwd),
             "commit": commit,
             "branch": branch,
             "dirty": dirty,
-            "pve_host": _pve_host(),
+            "pve_host": get_pve_host(),
         }
     except Exception:  # noqa: BLE001
-        return {"status": "ok", "version": os.getenv("CLUSTERMCP_VERSION", "0.8.0-dev"), "pve_host": _pve_host()}
+        return {
+            "status": "ok",
+            "version": resolve_app_version(),
+            "pve_host": get_pve_host(),
+        }
 
 
 def collect_visibility_report(
     include_graph_data: bool = True,
     node_filter: str | None = None,
 ) -> dict[str, Any]:
-    """Gather live probes and build the visibility report dict."""
+    """Gather live probes and build the visibility report dict.
+
+    Never raises for PVE/Ceph/Wardens probe failures — records probe_errors.
+    """
     probe_errors: dict[str, str] = {}
 
-    nodes, err = _safe_get("/api2/json/nodes")
-    if err:
-        probe_errors["nodes"] = err
-        nodes = []
-
-    resources, err = _safe_get("/api2/json/cluster/resources")
-    if err:
-        probe_errors["resources"] = err
-        resources = []
-
-    cluster_status, err = _safe_get("/api2/json/cluster/status")
-    if err:
-        probe_errors["cluster_status"] = err
-        cluster_status = []
-
-    # Prefer CephService (normalized) but keep raw tree attempts for OSD detail
-    ceph_status: dict[str, Any] = {}
-    ceph_osds_raw: Any = None
     try:
-        svc = CephService()
+        nodes, err = _safe_get("/api2/json/nodes")
+        if err:
+            probe_errors["nodes"] = err
+            nodes = []
+
+        resources, err = _safe_get("/api2/json/cluster/resources")
+        if err:
+            probe_errors["resources"] = err
+            resources = []
+
+        cluster_status, err = _safe_get("/api2/json/cluster/status")
+        if err:
+            probe_errors["cluster_status"] = err
+            cluster_status = []
+
+        ceph_status: dict[str, Any] = {}
+        ceph_osds_raw: Any = None
         try:
-            ceph_status = svc.get_status() or {}
+            svc = CephService()
+            try:
+                ceph_status = svc.get_status() or {}
+            except Exception as exc:  # noqa: BLE001
+                probe_errors["ceph_status"] = f"{type(exc).__name__}: {exc}"
+                raw_status, err = _safe_get("/api2/json/cluster/ceph/status")
+                if err:
+                    probe_errors["ceph_status_raw"] = err
+                else:
+                    ceph_status = raw_status or {}
+            try:
+                ceph_osds_raw = svc.get_osds()
+            except Exception as exc:  # noqa: BLE001
+                probe_errors["ceph_osds"] = f"{type(exc).__name__}: {exc}"
+                ceph_osds_raw = None
         except Exception as exc:  # noqa: BLE001
-            probe_errors["ceph_status"] = f"{type(exc).__name__}: {exc}"
+            probe_errors["ceph_service"] = f"{type(exc).__name__}: {exc}"
             raw_status, err = _safe_get("/api2/json/cluster/ceph/status")
             if err:
-                probe_errors["ceph_status_raw"] = err
+                probe_errors["ceph_status"] = err
             else:
                 ceph_status = raw_status or {}
-        try:
-            ceph_osds_raw = svc.get_osds()
-        except Exception as exc:  # noqa: BLE001
-            probe_errors["ceph_osds"] = f"{type(exc).__name__}: {exc}"
-            ceph_osds_raw = None
-    except Exception as exc:  # noqa: BLE001
-        probe_errors["ceph_service"] = f"{type(exc).__name__}: {exc}"
-        raw_status, err = _safe_get("/api2/json/cluster/ceph/status")
-        if err:
-            probe_errors["ceph_status"] = err
-        else:
-            ceph_status = raw_status or {}
-        raw_osds, err = _safe_get("/api2/json/cluster/ceph/osd")
-        if err:
-            probe_errors["ceph_osds"] = err
-        else:
-            ceph_osds_raw = raw_osds
-
-    # Always try raw node OSD trees to recover detail when service list is empty
-    if not ceph_osds_raw:
-        tree_bits: list[Any] = []
-        node_names = []
-        if isinstance(nodes, list):
-            node_names = [n.get("node") for n in nodes if n.get("node")]
-        if not node_names and isinstance(cluster_status, list):
-            node_names = [n.get("name") for n in cluster_status if n.get("type") == "node" and n.get("name")]
-        for name in node_names:
-            raw, err = _safe_get(f"/api2/json/nodes/{name}/ceph/osd")
+            raw_osds, err = _safe_get("/api2/json/cluster/ceph/osd")
             if err:
-                probe_errors[f"ceph_osds_{name}"] = err
-            elif raw is not None:
-                tree_bits.append({"node": name, "data": raw})
-        if tree_bits:
-            ceph_osds_raw = tree_bits
+                probe_errors["ceph_osds"] = err
+            else:
+                ceph_osds_raw = raw_osds
 
-    return build_visibility_report(
-        nodes=nodes if isinstance(nodes, list) else [],
-        resources=resources if isinstance(resources, list) else [],
-        cluster_status=cluster_status if isinstance(cluster_status, list | dict) else [],
-        ceph_status=ceph_status if isinstance(ceph_status, dict) else {},
-        ceph_osds_raw=ceph_osds_raw,
-        mcp_health=_mcp_health_snapshot(),
-        node_filter=node_filter,
-        include_graph_data=include_graph_data,
-        probe_errors=probe_errors,
-    )
+        if not ceph_osds_raw:
+            tree_bits: list[Any] = []
+            node_names: list[str] = []
+            if isinstance(nodes, list):
+                node_names = [n.get("node") for n in nodes if isinstance(n, dict) and n.get("node")]
+            if not node_names and isinstance(cluster_status, list):
+                node_names = [
+                    n.get("name")
+                    for n in cluster_status
+                    if isinstance(n, dict) and n.get("type") == "node" and n.get("name")
+                ]
+            for name in node_names[:8]:
+                raw, err = _safe_get(f"/api2/json/nodes/{name}/ceph/osd")
+                if err:
+                    probe_errors[f"ceph_osds_{name}"] = err
+                elif raw is not None:
+                    tree_bits.append({"node": name, "data": raw})
+            if tree_bits:
+                ceph_osds_raw = tree_bits
+
+        wardens_enrolled: list[dict[str, Any]] | dict[str, Any] | None = None
+        wardens_reports: dict[str, Any] = {}
+        try:
+            from services.node_inventory import get_inventory
+
+            wardens_enrolled = [
+                {
+                    "node": n.node,
+                    "host": n.host,
+                    "warden_version": n.warden_version,
+                    "collector_caps": n.collector_caps,
+                    "auth_method": n.auth_method,
+                }
+                for n in get_inventory().list_nodes()
+            ]
+        except Exception as exc:  # noqa: BLE001
+            probe_errors["wardens_enrolled"] = f"{type(exc).__name__}: {exc}"
+            wardens_enrolled = None
+
+        try:
+            from routers.wardens import get_store
+
+            store = get_store()
+            for name in store.list_report_nodes():
+                rep = store.load_report(name)
+                if rep is not None:
+                    wardens_reports[str(name)] = rep
+            if not wardens_enrolled:
+                caps = store.list_capabilities()
+                if caps:
+                    wardens_enrolled = {
+                        node: {
+                            "warden_version": data.get("warden_version"),
+                            "collector_caps": data.get("collector_caps") or [],
+                            "runner_allowlist": data.get("runner_allowlist") or [],
+                        }
+                        for node, data in caps.items()
+                    }
+        except Exception as exc:  # noqa: BLE001
+            probe_errors["wardens_reports"] = f"{type(exc).__name__}: {exc}"
+
+        return build_visibility_report(
+            nodes=nodes if isinstance(nodes, list) else [],
+            resources=resources if isinstance(resources, list) else [],
+            cluster_status=cluster_status if isinstance(cluster_status, list | dict) else [],
+            ceph_status=ceph_status if isinstance(ceph_status, dict) else {},
+            ceph_osds_raw=ceph_osds_raw,
+            mcp_health=_mcp_health_snapshot(),
+            wardens_enrolled=wardens_enrolled,
+            wardens_reports=wardens_reports or None,
+            node_filter=node_filter,
+            include_graph_data=include_graph_data,
+            probe_errors=probe_errors,
+        )
+    except Exception as exc:  # noqa: BLE001
+        probe_errors["visibility_builder"] = f"{type(exc).__name__}: {exc}"
+        return build_visibility_report(
+            nodes=[],
+            resources=[],
+            cluster_status=[],
+            ceph_status={},
+            ceph_osds_raw=None,
+            mcp_health=_mcp_health_snapshot(),
+            wardens_enrolled=None,
+            wardens_reports=None,
+            node_filter=node_filter,
+            include_graph_data=include_graph_data,
+            probe_errors=probe_errors,
+        )
 
 
 @router.get("/visibility", response_model=ActionResponse)
 def visibility_report(include_graph_data: bool = True, node_filter: str | None = None):
-    """
-    Generate comprehensive visibility report for Stronghold cluster from live probes.
-
-    Returns structured data + Markdown sections. Does not invent missing metrics.
-    """
+    """Generate visibility report from live probes. Soft-fails when PVE is down."""
     logger = get_logger()
     logger.info("Generating visibility report")
     try:
@@ -167,9 +225,19 @@ def visibility_report(include_graph_data: bool = True, node_filter: str | None =
             node_filter=node_filter,
         )
         return ActionResponse(success=True, data=report_data)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
         logger.exception("Visibility report generation failed")
-        raise HTTPException(500, detail="Failed to generate visibility report") from None
+        return ActionResponse(
+            success=False,
+            error=f"{type(exc).__name__}: {exc}",
+            data={
+                "overall": "down",
+                "data_policy": "live_probes_only",
+                "probe_errors": {"visibility": f"{type(exc).__name__}: {exc}"},
+                "warnings": [f"Visibility builder crash soft-failed: {exc}"],
+                "pve_host": get_pve_host(),
+            },
+        )
 
 
 @router.get("/visibility.png")
@@ -187,6 +255,15 @@ def visibility_report_image(node_filter: str | None = None):
             "X-ClusterMCP-Data-Policy": "live_probes_only",
         }
         return Response(content=png, media_type="image/png", headers=headers)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
         logger.exception("Visibility report image generation failed")
-        raise HTTPException(500, detail="Failed to generate visibility report image") from None
+        return Response(
+            content=(
+                b'{"success":false,"error":"visibility_image_failed","detail":"'
+                + str(exc).encode("utf-8", errors="replace")[:200]
+                + b'"}'
+            ),
+            media_type="application/json",
+            status_code=200,
+            headers={"X-ClusterMCP-Report-Overall": "down"},
+        )

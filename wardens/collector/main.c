@@ -193,6 +193,13 @@ static int build_report_json(
             return -1;
         }
 
+        if (json_escape_into(esc, sizeof(esc), e->nets) != 0) {
+            return -1;
+        }
+        if (append_fmt(json, size, &used, "\"nets\":\"%s\",", esc) != 0) {
+            return -1;
+        }
+
         if (json_escape_into(esc, sizeof(esc), e->idmap) != 0) {
             return -1;
         }
@@ -360,7 +367,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "WARDEN_NODE is required (e.g. export WARDEN_NODE=pvenodeone)\n");
         return 2;
     }
-    version = env_or("WARDEN_VERSION", "0.5.0");
+    version = env_or("WARDEN_VERSION", "0.5.1");
 
     fprintf(stderr, "Wardens bridge v%s collect (node=%s)\n", version, node);
 
