@@ -145,6 +145,162 @@ def extract_osds_from_tree(payload: Any) -> list[dict[str, Any]]:
     return sorted(dedup.values(), key=lambda r: (r.get("id") is None, r.get("id") if r.get("id") is not None else 0, str(r.get("name"))))
 
 
+def _normalize_wardens_payload(
+    *,
+    enrolled: list[dict[str, Any]] | dict[str, Any] | None,
+    reports: dict[str, Any] | list[Any] | None,
+    expected_nodes: list[str] | None = None,
+    node_filter: str | None = None,
+) -> dict[str, Any]:
+    """Normalize Wardens inventory + last reports into report section data."""
+    enrolled_rows: list[dict[str, Any]] = []
+    if isinstance(enrolled, dict):
+        # GET /wardens/nodes shape: {node: {warden_version, collector_caps, ...}}
+        if "nodes" in enrolled and isinstance(enrolled.get("nodes"), dict):
+            for name, meta in enrolled["nodes"].items():
+                if not isinstance(meta, dict):
+                    continue
+                enrolled_rows.append(
+                    {
+                        "node": name,
+                        "host": meta.get("host"),
+                        "warden_version": meta.get("warden_version"),
+                        "collector_caps": list(meta.get("collector_caps") or []),
+                        "auth_method": meta.get("auth_method"),
+                        "runner_allowlist": list(meta.get("runner_allowlist") or []),
+                    }
+                )
+        elif "nodes" in enrolled and isinstance(enrolled.get("nodes"), list):
+            enrolled_rows = [dict(x) for x in enrolled["nodes"] if isinstance(x, dict)]
+        else:
+            for name, meta in enrolled.items():
+                if not isinstance(meta, dict):
+                    continue
+                enrolled_rows.append(
+                    {
+                        "node": name,
+                        "host": meta.get("host"),
+                        "warden_version": meta.get("warden_version"),
+                        "collector_caps": list(meta.get("collector_caps") or []),
+                        "auth_method": meta.get("auth_method"),
+                        "runner_allowlist": list(meta.get("runner_allowlist") or []),
+                    }
+                )
+    elif isinstance(enrolled, list):
+        enrolled_rows = [dict(x) for x in enrolled if isinstance(x, dict)]
+
+    reports_by_node: dict[str, Any] = {}
+    if isinstance(reports, dict):
+        # either {node: report} or {"nodes":[...names]} only — names alone mean presence
+        if all(isinstance(v, dict) for v in reports.values()) and "nodes" not in reports:
+            reports_by_node = {str(k): v for k, v in reports.items()}
+        else:
+            for k, v in reports.items():
+                if k == "nodes" and isinstance(v, list):
+                    for name in v:
+                        reports_by_node.setdefault(str(name), {})
+                elif isinstance(v, dict):
+                    reports_by_node[str(k)] = v
+    elif isinstance(reports, list):
+        for item in reports:
+            if isinstance(item, dict) and item.get("node"):
+                reports_by_node[str(item["node"])] = item
+            elif isinstance(item, str):
+                reports_by_node.setdefault(item, {})
+
+    if node_filter:
+        enrolled_rows = [r for r in enrolled_rows if r.get("node") == node_filter]
+        reports_by_node = {k: v for k, v in reports_by_node.items() if k == node_filter}
+        expected_nodes = [n for n in (expected_nodes or []) if n == node_filter]
+
+    by_name = {str(r.get("node")): r for r in enrolled_rows if r.get("node")}
+    names = sorted(
+        {
+            *by_name.keys(),
+            *reports_by_node.keys(),
+            *(expected_nodes or []),
+        }
+    )
+
+    node_rows: list[dict[str, Any]] = []
+    versions: list[str] = []
+    caps_union: set[str] = set()
+    for name in names:
+        inv = by_name.get(name) or {}
+        rep = reports_by_node.get(name)
+        report_body = rep if isinstance(rep, dict) else {}
+        has_report = bool(
+            report_body
+            and (
+                report_body.get("lxc") is not None
+                or report_body.get("permission")
+                or report_body.get("warden_version")
+                or report_body.get("node")
+            )
+        )
+        lxc_rows = list(report_body.get("lxc") or []) if has_report else []
+        # collector may emit duplicate vmid rows (net0 vs mounts); unique by vmid
+        vmids = sorted({str(x.get("vmid")) for x in lxc_rows if x.get("vmid") is not None})
+        perm = report_body.get("permission") if isinstance(report_body.get("permission"), dict) else {}
+        version = inv.get("warden_version") or report_body.get("warden_version")
+        if version:
+            versions.append(str(version))
+        caps = list(inv.get("collector_caps") or [])
+        caps_union.update(str(c) for c in caps)
+        is_enrolled = name in by_name
+        status = "ok"
+        if not is_enrolled:
+            status = "missing"
+        elif not has_report:
+            status = "no_report"
+        elif perm and perm.get("readable") is False:
+            status = "warn"
+        node_rows.append(
+            {
+                "node": name,
+                "status": status,
+                "enrolled": is_enrolled,
+                "host": inv.get("host"),
+                "warden_version": version,
+                "collector_caps": caps,
+                "auth_method": inv.get("auth_method") or ("ssh_key" if is_enrolled else None),
+                "has_report": has_report,
+                "lxc_count": len(vmids) if has_report else None,
+                "lxc_vmids": vmids if has_report else [],
+                "permission_readable": perm.get("readable") if perm else None,
+                "permission_path": perm.get("target_path") if perm else None,
+            }
+        )
+
+    enrolled_count = sum(1 for r in node_rows if r.get("enrolled"))
+    report_count = sum(1 for r in node_rows if r.get("has_report"))
+    unique_versions = sorted(set(versions))
+    expected = list(expected_nodes or [])
+    missing_enrollment = [n for n in expected if n not in by_name]
+    overall = "ok"
+    if missing_enrollment or any(r.get("status") == "missing" for r in node_rows):
+        overall = "degraded"
+    if enrolled_count == 0 and expected:
+        overall = "down"
+    if enrolled_count and report_count == 0:
+        overall = "degraded"
+    if any(r.get("status") in ("no_report", "warn") for r in node_rows):
+        if overall == "ok":
+            overall = "degraded"
+
+    return {
+        "overall": overall,
+        "enrolled_count": enrolled_count,
+        "report_count": report_count,
+        "expected_count": len(expected) if expected else len(node_rows),
+        "versions": unique_versions,
+        "version_uniform": len(unique_versions) <= 1,
+        "collector_caps": sorted(caps_union),
+        "missing_enrollment": missing_enrollment,
+        "nodes": node_rows,
+    }
+
+
 def build_visibility_report(
     *,
     nodes: list[dict[str, Any]] | None,
@@ -153,6 +309,8 @@ def build_visibility_report(
     ceph_status: dict[str, Any] | None,
     ceph_osds_raw: Any,
     mcp_health: dict[str, Any] | None = None,
+    wardens_enrolled: list[dict[str, Any]] | dict[str, Any] | None = None,
+    wardens_reports: dict[str, Any] | list[Any] | None = None,
     node_filter: str | None = None,
     include_graph_data: bool = True,
     probe_errors: dict[str, str] | None = None,
@@ -371,6 +529,49 @@ def build_visibility_report(
     ]
     if unknown_storage:
         warnings.append(f"Storage status unknown/degraded: {', '.join(unknown_storage)}")
+
+    wardens_probed = (
+        wardens_enrolled is not None
+        or wardens_reports is not None
+        or "wardens_enrolled" in probe_errors
+        or "wardens" in probe_errors
+        or any(k.startswith("wardens_") for k in probe_errors)
+    )
+    if wardens_probed:
+        wardens = _normalize_wardens_payload(
+            enrolled=wardens_enrolled,
+            reports=wardens_reports,
+            expected_nodes=[n["node"] for n in node_inventory if n.get("node")],
+            node_filter=node_filter,
+        )
+        wardens["available"] = True
+        if wardens.get("missing_enrollment"):
+            warnings.append(
+                "Warden not enrolled on: " + ", ".join(wardens["missing_enrollment"])
+            )
+        no_report_nodes = [
+            r["node"]
+            for r in wardens.get("nodes") or []
+            if r.get("enrolled") and not r.get("has_report")
+        ]
+        if no_report_nodes:
+            warnings.append("Warden report missing for: " + ", ".join(no_report_nodes))
+        if wardens.get("versions") and not wardens.get("version_uniform"):
+            warnings.append("Warden version drift: " + ", ".join(wardens["versions"]))
+    else:
+        # Caller omitted wardens probes entirely (legacy path)
+        wardens = {
+            "overall": "unknown",
+            "enrolled_count": 0,
+            "report_count": 0,
+            "expected_count": len(node_inventory),
+            "versions": [],
+            "version_uniform": True,
+            "collector_caps": [],
+            "missing_enrollment": [],
+            "nodes": [],
+            "available": False,
+        }
     for key, err in probe_errors.items():
         warnings.append(f"Probe error ({key}): {err}")
 
@@ -383,6 +584,10 @@ def build_visibility_report(
         overall = "down"
     if probe_errors.get("nodes") and probe_errors.get("resources"):
         overall = "down"
+    if wardens.get("overall") == "down":
+        overall = "down"
+    elif wardens.get("overall") == "degraded" and overall == "ok":
+        overall = "degraded"
 
     md_sections = {
         "nodes_table": _nodes_to_md(node_inventory),
@@ -392,6 +597,11 @@ def build_visibility_report(
             f"Storage: {resource_summary['storage']}"
         ),
         "ceph_summary": _ceph_to_md(ceph_health_status, pg_state_counts, osd_summary, mon_count),
+        "wardens_summary": (
+            f"**Wardens**: enrolled {wardens.get('enrolled_count')}/{wardens.get('expected_count')} | "
+            f"reports {wardens.get('report_count')} | versions {', '.join(wardens.get('versions') or []) or '—'} | "
+            f"caps {', '.join(wardens.get('collector_caps') or []) or '—'}"
+        ),
         "warnings": "\n".join(f"- {w}" for w in warnings) if warnings else "No critical warnings.",
         "containers_table": _containers_to_md(containers),
     }
@@ -413,9 +623,12 @@ def build_visibility_report(
             "total_vms": resource_summary["vms"],
             "total_containers": resource_summary["containers"],
             "ceph_health": ceph_health_status,
+            "wardens_enrolled": wardens.get("enrolled_count"),
+            "wardens_reports": wardens.get("report_count"),
             "warnings_count": len(warnings),
             "overall": overall,
         },
+        "wardens": wardens,
         "node_inventory": node_inventory,
         "containers": containers,
         "storage": storage_rows,
@@ -430,6 +643,7 @@ def build_visibility_report(
             "osds": osds,
         },
         "warnings": warnings,
+        "attention": _attention_lines(warnings, probe_errors),
         "probe_errors": probe_errors,
         "markdown": md_sections,
         "raw_graph_data": {
@@ -444,6 +658,49 @@ def build_visibility_report(
         else None,
     }
     return report
+
+
+def _attention_lines(warnings: list[str], probe_errors: dict[str, str]) -> list[str]:
+    """Concrete Next: lines for ops (also used by PNG renderer)."""
+    steps: list[str] = []
+    seen: set[str] = set()
+
+    def add(step: str) -> None:
+        s = step.strip()
+        if s and s not in seen:
+            seen.add(s)
+            steps.append(s)
+
+    joined_err = " ".join(probe_errors.values()).lower()
+    if probe_errors.get("nodes") or probe_errors.get("resources") or probe_errors.get("cluster_status"):
+        if any(
+            x in joined_err
+            for x in ("name or service not known", "failed to resolve", "getaddrinfo", "nodename nor servname")
+        ):
+            add(
+                "Next: on MCP LXC set PVE_HOST to a resolvable host/IP:8006 and restart clustermcp"
+            )
+        elif any(x in joined_err for x in ("401", "403", "unauthorized", "authentication")):
+            add("Next: fix PVE API token on MCP LXC (.env PVE_TOKEN_*) — auth rejected")
+        else:
+            add("Next: restore MCP→PVE API plane (DNS/token/network) so /cluster and /ceph stop soft-failing")
+
+    for w in warnings:
+        wl = str(w).lower()
+        if "warden not enrolled" in wl:
+            add(f"Next: enroll missing Warden bridges (`cluster setup`) — {w.split(':', 1)[-1].strip()}")
+        elif "warden report missing" in wl:
+            add(f"Next: `cluster collect --all` for missing reports — {w.split(':', 1)[-1].strip()}")
+        elif "warden version drift" in wl:
+            add("Next: `cluster fleet-sync` (or update --all) so bridges share one version")
+        elif "ceph health" in wl and "unavailable" not in wl:
+            add(f"Next: inspect Ceph health on a mon (`ceph -s`) — {w}")
+        elif "degraded" in wl and "pg" in wl:
+            add("Next: run `ceph pg dump_stuck` / wait for active+clean")
+        elif "offline nodes" in wl:
+            add(f"Next: bring offline node(s) online — {w.split(':', 1)[-1].strip()}")
+
+    return steps
 
 
 def _nodes_to_md(nodes: list[dict]) -> str:

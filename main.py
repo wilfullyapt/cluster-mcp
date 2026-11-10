@@ -3,8 +3,10 @@ ClusterMCP Server — Repeatable, priv-aware tools for Proxmox clusters.
 Self-contained, deployable as LXC or Docker.
 Focus: status, reports, queries, routine maintenance (Ceph, cluster, network, tasks).
 Finite/one-off work stays on SSH path.
-Self-updating with commit visibility (v0.6.0+).
+Self-updating with commit visibility.
 """
+
+from __future__ import annotations
 
 import os
 import subprocess
@@ -13,8 +15,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from config import get_pve_host, resolve_app_version, settings
 from logging_config import configure_logging, get_logger, request_id_middleware
 from models import ActionResponse
 from routers import admin, capabilities, ceph, cluster, logs, lxc, report, wardens
@@ -26,9 +30,11 @@ configure_logging()
 setup_self_logging()
 logger = get_logger()
 
+APP_VERSION = resolve_app_version(settings.mcp_repo_root)
+
 app = FastAPI(
     title="ClusterMCP Server",
-    version="0.8.0-dev",
+    version=APP_VERSION,
     description=(
         "Priv-aware, repeatable tools: cluster status, Ceph, LXC/VM management, "
         "health snapshots. Self-updating with commit visibility."
@@ -73,6 +79,7 @@ try:
 except Exception as _sched_exc:  # noqa: BLE001
     logger.warning("Wardens collect scheduler not started", error=str(_sched_exc))
 
+
 # Optional API key protection on all routes (if MCP_API_KEY is set)
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
@@ -80,18 +87,40 @@ async def api_key_middleware(request: Request, call_next):
         get_api_key(request.headers.get("X-API-Key"))
     return await call_next(request)
 
-# Better error handling for PVE responses
+
+# Honest JSON error bodies — never bare dicts (ASGI requires a Response)
 @app.exception_handler(HTTPException)
 async def pve_error_handler(request: Request, exc: HTTPException):
     if exc.status_code == 403:
-        return {"success": False, "error": "Permission denied (check token ACLs)", "detail": exc.detail}
-    if exc.status_code >= 500:
-        return {"success": False, "error": "Proxmox API error", "detail": exc.detail}
-    return {"success": False, "error": str(exc.detail)}
+        body = {"success": False, "error": "Permission denied (check token ACLs)", "detail": exc.detail}
+    elif exc.status_code >= 500:
+        body = {"success": False, "error": "Proxmox API error", "detail": exc.detail}
+    else:
+        body = {"success": False, "error": str(exc.detail), "detail": exc.detail}
+    return JSONResponse(status_code=exc.status_code, content=body)
+
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception):
+    """Last-resort soft-fail: keep the worker alive and return JSON."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": False,
+            "error": "internal_error",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "data": {
+                "path": str(request.url.path),
+                "plane": "mcp",
+            },
+        },
+    )
+
 
 def _get_git_info() -> dict:
     """Return current commit, branch, and dirty status for version visibility."""
-    cwd = Path(".").resolve()
+    cwd = Path(__file__).resolve().parent
     try:
         commit = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"], cwd=cwd, text=True, timeout=5
@@ -106,19 +135,25 @@ def _get_git_info() -> dict:
     except Exception:
         return {"commit": "unknown", "branch": "unknown", "dirty": False}
 
-# Enhanced /health with commit visibility (v0.6.0+)
+
+# Enhanced /health with commit visibility
 @app.get("/health", response_model=ActionResponse)
 def health():
     git = _get_git_info()
-    return ActionResponse(success=True, data={
-        "status": "ok",
-        "version": "0.6.0-dev",
-        "commit": git["commit"],
-        "branch": git["branch"],
-        "dirty": git["dirty"],
-        "pve_host": os.getenv("PVE_HOST", "https://pve-01:8006")
-    })
+    return ActionResponse(
+        success=True,
+        data={
+            "status": "ok",
+            "version": APP_VERSION,
+            "commit": git["commit"],
+            "branch": git["branch"],
+            "dirty": git["dirty"],
+            "pve_host": get_pve_host(),
+        },
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

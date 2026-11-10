@@ -46,15 +46,15 @@ ClusterMCP  schedules intervals / runs; bridge never calls MCP
 
 Persistence: `WARDENS_DATA_DIR` — `nodes/`, `ssh/`, `capabilities/`, `reports/`. **No passwords.**
 
-### Collector bridge (`wardens/build/collector`) v0.4.0
+### Collector bridge (`wardens/build/collector`) v0.5.1
 
 | Capability | Status | Behavior |
 |------------|--------|----------|
-| `lxc:full` | **shipped** | Enumerate `/etc/pve/lxc/*.conf` (up to 64) |
+| `lxc:full` | **shipped** | Enumerate `/etc/pve/lxc/*.conf` (up to 64); **dedupe by VMID**; hostname + rootfs; **nets vs mp mounts separated** |
 | `permissions:audit` | **shipped** | `stat` + `access` on `/etc/pve/lxc` |
 | `host:summary` | **shipped** | loadavg, mem, uptime, kernel, pveversion |
 | `cephfs:mapping` | **shipped** | ceph-ish LXC mp* + storage.cfg cephfs names |
-| stdout JSON | **shipped** | forced-command `collect`; no MCP URL |
+| stdout JSON | **shipped** | forced-command `collect`; no MCP URL; LXC rows include `hostname`, `rootfs`, `mounts` (mp*), `nets` (net*) |
 
 ### Runner binary
 
@@ -80,8 +80,8 @@ Persistence: `WARDENS_DATA_DIR` — `nodes/`, `ssh/`, `capabilities/`, `reports/
   "auth_method": "ssh_key",
   "key_name": "warden-pvenodetwo",
   "collector_path": "/opt/wardens/bin/wardens-collector",
-  "warden_version": "0.4.0",
-  "collector_caps": ["lxc:full", "permissions:audit", "host:summary"]
+  "warden_version": "0.5.1",
+  "collector_caps": ["lxc:full", "permissions:audit", "host:summary", "cephfs:mapping"]
 }
 ```
 

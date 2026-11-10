@@ -17,7 +17,8 @@ typedef struct {
     char status[32];          /* running, stopped, etc. */
     char config_path[256];    /* /etc/pve/lxc/<vmid>.conf or equivalent */
     char rootfs[256];
-    char mounts[2048];        /* JSON array of bind mounts + options */
+    char mounts[2048];        /* mp* bind mounts only (not net*) */
+    char nets[1024];          /* net0/netN config lines, separate from mounts */
     char idmap[1024];         /* UID/GID mapping string */
     uint64_t memory_used;
     uint32_t cores;

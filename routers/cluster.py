@@ -1,55 +1,49 @@
-"""Cluster and node status router."""
+"""Cluster and node status router — soft-fail when PVE plane is down."""
 
-import os
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
+from logging_config import get_logger
 from models import ActionResponse
-from pve_client import get_session
+from pve_client import classify_pve_error, get_pve_host, pve_get
 
 router = APIRouter(prefix="/cluster", tags=["Cluster"])
+logger = get_logger()
+
+
+def _soft(path: str, label: str) -> ActionResponse:
+    data, err = pve_get(path)
+    if err:
+        logger.warning("cluster.%s failed: %s", label, err)
+        return ActionResponse(
+            success=False,
+            error=err,
+            data={
+                "available": False,
+                "plane": "pve",
+                "pve_host": get_pve_host(),
+                "status": classify_pve_error(err),
+                "path": path,
+                "label": label,
+            },
+        )
+    return ActionResponse(success=True, data=data)
 
 
 @router.get("/status", response_model=ActionResponse)
 def cluster_status():
-    try:
-        sess = get_session()
-        r = sess.get(f"{os.getenv('PVE_HOST', 'https://pve-01:8006')}/api2/json/cluster/status")
-        r.raise_for_status()
-        return ActionResponse(success=True, data=r.json()["data"])
-    except Exception:
-        from logging_config import get_logger
-        logger = get_logger()
-        logger.exception("Failed to get cluster status")
-        raise HTTPException(500, detail="Failed to retrieve cluster status")
+    return _soft("/cluster/status", "status")
 
 
 @router.get("/nodes", response_model=ActionResponse)
 def list_nodes():
-    try:
-        sess = get_session()
-        r = sess.get(f"{os.getenv('PVE_HOST', 'https://pve-01:8006')}/api2/json/nodes")
-        r.raise_for_status()
-        return ActionResponse(success=True, data=r.json()["data"])
-    except Exception:
-        from logging_config import get_logger
-        logger = get_logger()
-        logger.exception("Failed to list nodes")
-        raise HTTPException(500, detail="Failed to list nodes")
+    return _soft("/nodes", "nodes")
 
 
 @router.get("/resources", response_model=ActionResponse)
-def cluster_resources(type: str = None):
-    try:
-        sess = get_session()
-        url = f"{os.getenv('PVE_HOST', 'https://pve-01:8006')}/api2/json/cluster/resources"
-        if type:
-            url += f"?type={type}"
-        r = sess.get(url)
-        r.raise_for_status()
-        return ActionResponse(success=True, data=r.json()["data"])
-    except Exception:
-        from logging_config import get_logger
-        logger = get_logger()
-        logger.exception("Failed to get cluster resources")
-        raise HTTPException(500, detail="Failed to get resources")
+def cluster_resources(type: str | None = None):
+    path = "/cluster/resources"
+    if type:
+        path = f"{path}?type={type}"
+    return _soft(path, "resources")

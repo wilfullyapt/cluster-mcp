@@ -54,7 +54,7 @@ class UpdateResult:
 
 
 DEFAULT_COLLECTOR_REMOTE = "/opt/wardens/bin/wardens-collector"
-WARDEN_VERSION = "0.5.0"
+WARDEN_VERSION = "0.5.1"
 COLLECTOR_CAPS = ["lxc:full", "permissions:audit", "host:summary", "cephfs:mapping"]
 
 
